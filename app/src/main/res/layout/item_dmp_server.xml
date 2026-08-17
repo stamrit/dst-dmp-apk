@@ -1,0 +1,235 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_margin="8dp"
+    app:cardBackgroundColor="@color/dmp_card"
+    app:cardCornerRadius="18dp"
+    app:cardElevation="0dp"
+    app:strokeColor="@color/dmp_card_stroke"
+    app:strokeWidth="1dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/dmp_server_title"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:textColor="@color/dmp_text_primary"
+                    android:textSize="19sp" />
+
+                <TextView
+                    android:id="@+id/dmp_server_remark"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:maxLines="1"
+                    android:textColor="@color/dmp_text_secondary"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/dmp_server_options"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_dmp_options"
+                android:clickable="true"
+                android:contentDescription="@string/dmp_server_options"
+                android:focusable="true"
+                android:gravity="center"
+                android:text="@string/dmp_options_symbol"
+                android:textColor="@color/dmp_on_primary"
+                android:textSize="28sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:gravity="center_vertical"
+            android:baselineAligned="false"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/dmp_server_address"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_dmp_address"
+                    android:drawablePadding="8dp"
+                    android:maxLines="1"
+                    android:paddingStart="12dp"
+                    android:paddingTop="8dp"
+                    android:paddingEnd="12dp"
+                    android:paddingBottom="8dp"
+                    android:textColor="@color/dmp_green"
+                    android:textSize="13sp"
+                    app:drawableStartCompat="@drawable/ic_tool_network"
+                    app:drawableTint="@color/dmp_green" />
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/dmp_room_count"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_dmp_badge"
+                        android:paddingStart="12dp"
+                        android:paddingTop="7dp"
+                        android:paddingEnd="12dp"
+                        android:paddingBottom="7dp"
+                        android:textColor="@color/dmp_blue"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/dmp_world_count"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_dmp_badge"
+                        android:paddingStart="12dp"
+                        android:paddingTop="7dp"
+                        android:paddingEnd="12dp"
+                        android:paddingBottom="7dp"
+                        android:textColor="@color/dmp_blue"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/dmp_server_status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:maxLines="1"
+                    android:textColor="@color/dmp_text_secondary"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="14dp"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:layout_width="76dp"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:orientation="vertical">
+
+                    <FrameLayout
+                        android:layout_width="70dp"
+                        android:layout_height="70dp">
+
+                        <com.google.android.material.progressindicator.CircularProgressIndicator
+                            android:id="@+id/dmp_cpu_progress"
+                            android:layout_width="68dp"
+                            android:layout_height="68dp"
+                            android:layout_gravity="center"
+                            android:max="100"
+                            app:indicatorColor="@color/dmp_primary"
+                            app:indicatorSize="68dp"
+                            app:trackColor="@color/dmp_track"
+                            app:trackThickness="6dp" />
+
+                        <TextView
+                            android:id="@+id/dmp_cpu_value"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:gravity="center"
+                            android:textColor="@color/dmp_primary_text"
+                            android:textSize="13sp" />
+                    </FrameLayout>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                    android:text="@string/dmp_cpu"
+                        android:textColor="@color/dmp_text_secondary"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="76dp"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:orientation="vertical">
+
+                    <FrameLayout
+                        android:layout_width="70dp"
+                        android:layout_height="70dp">
+
+                        <com.google.android.material.progressindicator.CircularProgressIndicator
+                            android:id="@+id/dmp_memory_progress"
+                            android:layout_width="68dp"
+                            android:layout_height="68dp"
+                            android:layout_gravity="center"
+                            android:max="100"
+                            app:indicatorColor="@color/dmp_primary"
+                            app:indicatorSize="68dp"
+                            app:trackColor="@color/dmp_track"
+                            app:trackThickness="6dp" />
+
+                        <TextView
+                            android:id="@+id/dmp_memory_value"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:gravity="center"
+                            android:textColor="@color/dmp_primary_text"
+                            android:textSize="13sp" />
+                    </FrameLayout>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/dmp_memory"
+                        android:textColor="@color/dmp_text_secondary"
+                        android:textSize="11sp" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/dmp_enter_button"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="20dp"
+            android:fontFamily="sans-serif-medium"
+            android:text="@string/dmp_enter"
+            android:textAllCaps="false"
+            android:textColor="@color/dmp_on_primary"
+            android:textSize="16sp"
+            app:backgroundTint="@color/dmp_primary"
+            app:cornerRadius="10dp" />
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>

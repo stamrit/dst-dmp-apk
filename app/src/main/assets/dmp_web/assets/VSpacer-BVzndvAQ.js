@@ -1,0 +1,1 @@
+import{p as e}from"./electronApi-DLNyHQQp.js";var t=e(`v-spacer`,`div`,`VSpacer`);export{t};

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="dmp_page">#24213D</color>
+    <color name="dmp_toolbar">#2E2A4B</color>
+    <color name="dmp_card">#332F54</color>
+    <color name="dmp_card_stroke">#3F3A64</color>
+    <color name="dmp_text_primary">#E9E4F8</color>
+    <color name="dmp_text_secondary">#AAA4C5</color>
+    <color name="dmp_text_muted">#8F89A8</color>
+    <color name="dmp_primary">#8850FF</color>
+    <color name="dmp_primary_soft">#46366F</color>
+    <color name="dmp_primary_text">#B899FF</color>
+    <color name="dmp_on_primary">#FFFFFF</color>
+    <color name="dmp_green">#55E013</color>
+    <color name="dmp_green_surface">#20382F</color>
+    <color name="dmp_blue">#28B8FF</color>
+    <color name="dmp_blue_surface">#294B78</color>
+    <color name="dmp_warning">#FF9E80</color>
+    <color name="dmp_input">#302C4E</color>
+    <color name="dmp_input_stroke">#766F9C</color>
+    <color name="dmp_track">#514C70</color>
+</resources>

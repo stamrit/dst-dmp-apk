@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_dmp_dialog"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="28dp">
+
+        <TextView
+            android:id="@+id/dmp_dialog_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-black"
+            android:textColor="@color/dmp_text_primary"
+            android:textSize="22sp" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/dmp_host_layout"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="26dp"
+            android:hint="@string/dmp_host"
+            android:textColorHint="@color/dmp_text_secondary"
+            app:boxBackgroundColor="@color/dmp_input"
+            app:boxCornerRadiusBottomEnd="12dp"
+            app:boxCornerRadiusBottomStart="12dp"
+            app:boxCornerRadiusTopEnd="12dp"
+            app:boxCornerRadiusTopStart="12dp"
+            app:boxStrokeColor="@color/dmp_input_stroke"
+            app:hintTextColor="@color/dmp_text_secondary">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/dmp_host_input"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="textUri"
+                android:maxLines="1"
+                android:textColor="@color/dmp_text_primary"
+                android:textColorHint="@color/dmp_text_muted" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:baselineAligned="false"
+            android:orientation="horizontal">
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/dmp_port_layout"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1"
+                android:hint="@string/dmp_port"
+                android:textColorHint="@color/dmp_text_secondary"
+                app:boxBackgroundColor="@color/dmp_input"
+                app:boxCornerRadiusBottomEnd="12dp"
+                app:boxCornerRadiusBottomStart="12dp"
+                app:boxCornerRadiusTopEnd="12dp"
+                app:boxCornerRadiusTopStart="12dp"
+                app:boxStrokeColor="@color/dmp_input_stroke"
+                app:hintTextColor="@color/dmp_text_secondary">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/dmp_port_input"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="number"
+                    android:maxLines="1"
+                    android:textColor="@color/dmp_text_primary" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_dmp_input"
+                android:orientation="vertical"
+                android:paddingStart="14dp"
+                android:paddingTop="7dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="4dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/dmp_protocol"
+                    android:textColor="@color/dmp_text_secondary"
+                    android:textSize="11sp" />
+
+                <Spinner
+                    android:id="@+id/dmp_protocol"
+                    android:layout_width="match_parent"
+                    android:layout_height="42dp"
+                    android:popupBackground="@color/dmp_input"
+                    android:spinnerMode="dropdown" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/dmp_token_layout"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:hint="@string/dmp_platform_token"
+            android:textColorHint="@color/dmp_text_secondary"
+            app:boxBackgroundColor="@color/dmp_input"
+            app:boxCornerRadiusBottomEnd="12dp"
+            app:boxCornerRadiusBottomStart="12dp"
+            app:boxCornerRadiusTopEnd="12dp"
+            app:boxCornerRadiusTopStart="12dp"
+            app:boxStrokeColor="@color/dmp_input_stroke"
+            app:endIconTint="@color/dmp_text_secondary"
+            app:endIconMode="password_toggle"
+            app:hintTextColor="@color/dmp_text_secondary">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/dmp_token_input"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="textPassword"
+                android:maxLines="1"
+                android:textColor="@color/dmp_text_primary" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:hint="@string/dmp_remark"
+            android:textColorHint="@color/dmp_text_secondary"
+            app:boxBackgroundColor="@color/dmp_input"
+            app:boxCornerRadiusBottomEnd="12dp"
+            app:boxCornerRadiusBottomStart="12dp"
+            app:boxCornerRadiusTopEnd="12dp"
+            app:boxCornerRadiusTopStart="12dp"
+            app:boxStrokeColor="@color/dmp_input_stroke"
+            app:hintTextColor="@color/dmp_text_secondary">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/dmp_remark_input"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:textColor="@color/dmp_text_primary" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/dmp_dialog_submit"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:layout_marginTop="24dp"
+            android:text="@string/dmp_submit"
+            android:textAllCaps="false"
+            android:textSize="16sp"
+            app:backgroundTint="@color/dmp_primary"
+            app:cornerRadius="12dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/dmp_dialog_cancel"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="6dp"
+            android:text="@string/dmp_cancel"
+            android:textAllCaps="false"
+            android:textColor="@color/dmp_text_secondary" />
+    </LinearLayout>
+</ScrollView>

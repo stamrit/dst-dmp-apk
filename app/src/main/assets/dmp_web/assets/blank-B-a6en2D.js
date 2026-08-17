@@ -1,0 +1,1 @@
+import{D as e,St as t,b as n,mt as r}from"./runtime-core.esm-bundler-B4b-2GOK.js";import{t as i}from"./_plugin-vue_export-helper-BDNMzG2s.js";var a={},o={class:`layout-wrapper layout-blank`,"data-allow-mismatch":``};function s(i,a){let s=t(`router-view`);return r(),n(`div`,o,[e(s)])}var c=i(a,[[`render`,s]]);export{c as default};

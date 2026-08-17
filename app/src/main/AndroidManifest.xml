@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@drawable/dmp_logo"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.DmpMobile"
+        android:usesCleartextTraffic="true">
+
+        <activity
+            android:name="cn.xiaojie_gjs.bianjiemj.ui.dmp.DmpWebActivity"
+            android:configChanges="keyboardHidden|orientation|screenSize|smallestScreenSize"
+            android:exported="false" />
+
+        <activity
+            android:name="cn.xiaojie_gjs.bianjiemj.ui.dmp.DmpActivity"
+            android:configChanges="keyboardHidden|orientation|screenSize|smallestScreenSize"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

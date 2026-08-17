@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <WebView
+            android:id="@+id/dmp_web_view"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/dmp_page" />
+
+        <LinearLayout
+            android:id="@+id/dmp_web_error_panel"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="36dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-black"
+                android:text="@string/dmp_error_title"
+                android:textColor="@color/dmp_text_primary"
+                android:textSize="23sp" />
+
+            <TextView
+                android:id="@+id/dmp_web_error_detail"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:gravity="center"
+                android:textColor="@color/dmp_text_muted"
+                android:textSize="13sp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/dmp_web_retry"
+                android:layout_width="220dp"
+                android:layout_height="52dp"
+                android:layout_marginTop="26dp"
+                android:text="@string/dmp_retry"
+                android:textAllCaps="false"
+                app:backgroundTint="@color/dmp_primary"
+                app:cornerRadius="15dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/dmp_web_change_server"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="220dp"
+                android:layout_height="52dp"
+                android:layout_marginTop="10dp"
+                android:text="@string/dmp_change_server"
+                android:textAllCaps="false"
+                android:textColor="@color/dmp_primary"
+                app:cornerRadius="15dp"
+                app:strokeColor="@color/dmp_primary" />
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/dmp_web_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="3dp"
+            android:layout_gravity="top"
+            android:max="100"
+            android:progressTint="@color/dmp_primary" />
+    </FrameLayout>
+</LinearLayout>

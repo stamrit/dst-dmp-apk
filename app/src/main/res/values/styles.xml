@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.DmpMobile" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/dmp_primary</item>
+        <item name="colorPrimaryVariant">@color/dmp_primary_text</item>
+        <item name="colorOnPrimary">@color/dmp_on_primary</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:fontFamily">sans</item>
+    </style>
+</resources>

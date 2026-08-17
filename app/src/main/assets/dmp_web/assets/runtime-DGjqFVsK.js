@@ -1,0 +1,1 @@
+import{mt as e,v as t}from"./runtime-core.esm-bundler-B4b-2GOK.js";import{t as n}from"./singleLog-CW9MdNA5.js";var r={__name:`runtime`,setup(r){return(r,i)=>(e(),t(n,{type:`runtime`}))}};export{r as default};
