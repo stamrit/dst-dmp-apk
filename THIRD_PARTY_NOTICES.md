@@ -1,49 +1,58 @@
-Third-Party Notices
+# Third-Party Notices
 
-This project contains software and/or derivative works based on the following open-source project:
+This project contains software, frontend resources, and/or derivative works
+based on third-party open-source projects.
 
-DST Management Platform API
+## DST Management Platform Desktop
 
 Original project:
 
-https://github.com/MiracleEverywhere/dst-management-platform-api
+https://github.com/miracleEverywhere/dst-management-platform-desktop
 
-Original author/project:
+Copyright (c) 2025 Miracle
 
-MiracleEverywhere / DST Management Platform contributors
+License: MIT License
 
-License:
+This Android project contains adapted and/or bundled frontend resources
+derived from DST Management Platform Desktop.
 
-MIT License
+The original MIT License and copyright notice are preserved in:
 
-This Android project includes adaptations, modifications, and/or bundled frontend resources derived from the DST Management Platform project.
+LICENSES/DST-Management-Platform-Desktop-MIT.txt
 
-The original project is licensed under the MIT License. The original copyright notice and MIT License remain applicable to the portions of this project derived from the original project.
+## DST Management Platform API
 
-The MIT License permits use, copying, modification, merging, publishing, distribution, sublicensing, and/or selling copies of the software, subject to the requirement that the original copyright notice and permission notice are preserved.
+Original project:
 
-For the authoritative copyright notice and license text applicable to the original project, please refer to the LICENSE file of the upstream project:
+https://github.com/miracleEverywhere/dst-management-platform-api
 
-https://github.com/MiracleEverywhere/dst-management-platform-api
+This Android project is designed to communicate with and provide an Android
+client for the DST Management Platform API.
 
----
+Any code or other material derived from this upstream project remains subject
+to the applicable license and copyright notices of the upstream project.
 
-Modifications
+## Modifications and Android Project
 
-Android adaptation and additional development for this repository:
+Android adaptation and additional development:
 
 https://github.com/stamrit/dst-dmp-apk
 
-The Android-specific code, modifications, integrations, user interface adaptations, and other newly created portions of this repository are modifications or additions made for this project.
+Android-specific code, integrations, user interface adaptations, Android
+bridges, and other original portions of this repository were created or
+modified specifically for this project.
 
-Unless otherwise stated, attribution to the original DST Management Platform project does not imply endorsement of this Android project by the original authors.
+Unless otherwise stated, these original portions are subject to the license
+terms in the root LICENSE file.
 
----
+Attribution to the upstream projects does not imply endorsement of this
+Android project by their authors.
 
-Disclaimer
+## Disclaimer
 
-This is an unofficial third-party Android adaptation.
+This is an unofficial third-party Android project.
 
 This project is not affiliated with or endorsed by Klei Entertainment.
 
-Don't Starve Together and related trademarks and assets are the property of their respective owners.
+Don't Starve Together and related names, trademarks, and assets are the
+property of their respective owners.
