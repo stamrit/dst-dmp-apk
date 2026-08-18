@@ -1,33 +1,34 @@
 <h1 align="center">DST DMP Android</h1><p align="center">
   <strong>Don't Starve Together · DMP Android 管理客户端</strong>
 </p><p align="center">
-  在 Android 设备上连接和管理 DST Management Platform
+  面向 Android 手机和平板的 DST Management Platform 第三方客户端
 </p><p align="center">
-  <strong>非官方第三方 Android 客户端</strong>
+  <strong>非官方项目 · Android 适配</strong>
 </p>---
 
 📱 项目介绍
 
 DST DMP Android 是一个面向 Android 的 Don't Starve Together（饥荒联机版）服务器管理客户端。
 
-本项目用于在 Android 手机、平板等设备上连接 DST Management Platform（DMP），并针对 Android WebView、触摸操作和移动端环境进行适配。
+本项目用于在 Android 设备上连接 DST Management Platform（DMP） 服务端，并针对 Android WebView、触摸操作以及移动端使用环境进行适配。
 
-项目主要由以下部分组成：
+项目主要包含：
 
 - Android 原生客户端
-- DMP Web 前端
+- Android WebView
+- DMP Web 前端适配
 - DMP API 通信
 - JavaScript Bridge
-- Android WebView 适配
 - 移动端界面及交互适配
+- DMP 服务器连接与配置
 
-APK 内置经过适配的 DMP Web 前端资源，因此前端页面可以直接从 APK 本地资源加载。
+APK 内置经过 Android 适配的 DMP Web 前端资源，可直接从 APK 本地加载相关页面资源。
 
 ---
 
-🔗 上游项目
+🔗 相关上游项目
 
-本项目基于或使用以下开源项目。
+本项目使用、适配或与以下开源项目进行兼容。
 
 DST Management Platform API
 
@@ -35,12 +36,18 @@ DST Management Platform API
 
 https://github.com/miracleEverywhere/dst-management-platform-api
 
-DMP 服务端及 API 项目，为本 Android 客户端提供服务器管理相关 API。
+DST Management Platform 的服务端/API 项目。
 
-许可证：
+本 Android 客户端按照 DMP API 提供的接口与 DMP 服务端进行通信，实现相关服务器管理功能。
+
+原项目许可证：
 
 MIT License
 Copyright (c) 2024 Miracle
+
+MIT License 副本：
+
+LICENSES/DST-Management-Platform-API-MIT.txt
 
 ---
 
@@ -50,12 +57,16 @@ DST Management Platform Desktop
 
 https://github.com/miracleEverywhere/dst-management-platform-desktop
 
-本 APK 内置的部分 DMP Web 前端资源来源于或基于该项目，并针对 Android WebView 和移动端环境进行了适配。
+本 APK 内置的部分 DMP Web 前端资源来源于或基于 DST Management Platform Desktop，并针对 Android WebView 和移动设备进行了适配。
 
-许可证：
+原项目许可证：
 
 MIT License
 Copyright (c) 2025 Miracle
+
+MIT License 副本：
+
+LICENSES/DST-Management-Platform-Desktop-MIT.txt
 
 感谢 Miracle 以及 DST Management Platform 项目所有贡献者的开源工作。
 
@@ -63,7 +74,7 @@ Copyright (c) 2025 Miracle
 
 🧩 项目结构
 
-主要 Android 代码及 Web 前端资源位于：
+主要 Android 代码和 Web 前端资源位于：
 
 app/src/main/
 ├── java/
@@ -72,11 +83,9 @@ app/src/main/
 └── assets/
     └── dmp_web/
 
-其中：
+Android 原生部分
 
-"java/.../ui/dmp/"
-
-主要包含 Android 原生 DMP 功能，例如：
+"java/.../ui/dmp/" 中包含 Android 侧的 DMP 相关功能，例如：
 
 DmpActivity
 DmpWebActivity
@@ -84,9 +93,13 @@ DmpApiClient
 DmpJavascriptBridge
 ...
 
-"assets/dmp_web/"
+Web 前端
 
-包含 APK 内置的 DMP Web 前端资源。
+APK 内置 Web 前端位于：
+
+app/src/main/assets/dmp_web/
+
+其中部分前端资源来源于或基于 DST Management Platform Desktop。
 
 Android 原生代码与 Web 前端之间的部分功能通过 JavaScript Bridge 进行通信。
 
@@ -98,25 +111,21 @@ Android 原生代码与 Web 前端之间的部分功能通过 JavaScript Bridge 
 
 Windows
 
-普通构建
+普通构建：
 
 .\gradlew.bat :app:assembleDebug
 
-离线构建
-
-如果 Gradle 依赖已经缓存：
+如果 Gradle 依赖已经缓存，可以使用离线构建：
 
 .\gradlew.bat :app:assembleDebug --offline
 
----
-
 Linux / macOS
 
-普通构建
+普通构建：
 
 ./gradlew :app:assembleDebug
 
-离线构建
+离线构建：
 
 ./gradlew :app:assembleDebug --offline
 
@@ -128,7 +137,7 @@ Debug APK 默认生成在：
 
 app/build/outputs/apk/debug/
 
-通常可以在这里找到：
+通常为：
 
 app/build/outputs/apk/debug/app-debug.apk
 
@@ -136,31 +145,34 @@ app/build/outputs/apk/debug/app-debug.apk
 
 ---
 
-🌐 网络连接
+🌐 连接 DMP
 
-客户端需要连接一个可以正常访问的 DMP 服务端。
+客户端需要连接用户自行部署或有权使用的 DMP 服务端。
 
-例如局域网环境：
+例如局域网：
 
 http://192.168.1.100:端口
 
-或者通过域名访问：
+或者使用域名：
 
 https://example.com
 
-对于公网 DMP 服务，建议配置 HTTPS。
+实际地址、端口以及认证方式以 DMP 服务端配置为准。
 
-使用 HTTP 时，通信内容为明文，在不可信网络环境下可能存在认证信息或管理数据被监听、篡改的风险。
+对于通过公网访问的 DMP 服务，建议配置 HTTPS。
+
+HTTP 属于明文通信，在不可信网络环境中可能存在认证信息或管理数据被监听、篡改的风险。
 
 ---
 
 🔐 安全提醒
 
-请勿将真实的服务器认证信息提交到公开 GitHub 仓库，例如：
+请勿将真实的服务器认证信息提交到公开 GitHub 仓库，包括但不限于：
 
-- API Token
 - DMP 管理密码
-- Cookie / Session
+- API Token
+- Cookie
+- Session
 - SSH 密码
 - SSH 私钥
 - 服务器管理凭据
@@ -172,41 +184,59 @@ https://example.com
 
 📜 许可证
 
-本项目包含不同许可条件的代码与资源。
+本仓库包含适用不同许可条件的代码与资源。
 
-DMP API
+DST Management Platform API
 
-来自 DST Management Platform API 的代码、资源及其衍生部分继续按照原项目 MIT License 授权。
+DST Management Platform API：
 
 Copyright (c) 2024 Miracle
+MIT License
 
-完整 MIT License：
+对应许可证副本：
 
 LICENSES/DST-Management-Platform-API-MIT.txt
 
-DMP Desktop
+如果本项目包含来源于或衍生自 DST Management Platform API 的代码或其他受版权保护内容，这些部分继续按照原项目 MIT License 授权。
 
-来自 DST Management Platform Desktop 的代码、Web 前端资源及其衍生部分继续按照原项目 MIT License 授权。
+仅与 DMP API 进行通信或兼容本身不改变本项目原创 Android 代码的许可证。
+
+---
+
+DST Management Platform Desktop
+
+DST Management Platform Desktop：
 
 Copyright (c) 2025 Miracle
+MIT License
 
-完整 MIT License：
+本项目中来源于、修改自或基于 DST Management Platform Desktop 的 Web 前端资源继续按照原项目 MIT License 授权。
+
+对应许可证副本：
 
 LICENSES/DST-Management-Platform-Desktop-MIT.txt
 
-DST DMP Android 原创部分
+---
 
-除第三方开源组件及其衍生部分外，本项目自行开发的 Android 原生代码、Android 集成、移动端界面适配及其他原创内容按照仓库根目录：
+本项目原创部分
+
+除第三方开源组件、上游代码及其衍生部分外，本项目自行开发的 Android 原生代码、Android 集成、移动端适配及其他原创内容按照仓库根目录：
 
 LICENSE
 
 中的条款处理。
 
-«本仓库包含 MIT License 授权的第三方内容，但这并不意味着本仓库所有原创代码均以 MIT License 授权。»
+«本仓库包含 MIT License 授权的第三方内容，但这并不意味着本仓库全部原创代码均以 MIT License 授权。»
 
-完整第三方版权及许可证说明：
+第三方项目、版权和许可证的详细说明：
 
 THIRD_PARTY_NOTICES.md
+
+原始 MIT License 副本保存在：
+
+LICENSES/
+├── DST-Management-Platform-API-MIT.txt
+└── DST-Management-Platform-Desktop-MIT.txt
 
 ---
 
@@ -214,21 +244,21 @@ THIRD_PARTY_NOTICES.md
 
 本项目的部分代码、文档、调试、重构及开发过程可能使用 AI 工具辅助完成。
 
-AI 辅助开发不会改变第三方代码原本适用的许可证和版权归属。
+AI 辅助开发不会改变第三方代码原本适用的许可证或版权归属。
 
 ---
 
 ⚠️ 免责声明
 
-本项目是一个非官方第三方 Android 客户端。
+本项目是非官方第三方 Android 客户端。
 
-本项目与 DST Management Platform 原作者不存在官方隶属、赞助或背书关系。
+本项目由独立开发者维护，与 DST Management Platform 原作者不存在官方隶属、赞助或背书关系。
 
 本项目与 Klei Entertainment 不存在官方关联、赞助或背书关系。
 
 Don't Starve、Don't Starve Together、Klei Entertainment 以及相关名称、商标、Logo、游戏资源和其他知识产权归其各自权利人所有。
 
-使用者应自行承担使用本项目连接、配置和管理服务器产生的风险。
+使用者应自行承担使用本项目连接、配置及管理服务器产生的风险。
 
 第三方开源组件继续适用其各自许可证中的免责声明和责任限制。
 
@@ -236,7 +266,7 @@ Don't Starve、Don't Starve Together、Klei Entertainment 以及相关名称、�
 
 ❤️ 致谢
 
-感谢以下开源项目及其贡献者：
+感谢 Miracle 以及 DST Management Platform 的所有贡献者。
 
 DST Management Platform API
 
@@ -246,4 +276,10 @@ DST Management Platform Desktop
 
 https://github.com/miracleEverywhere/dst-management-platform-desktop
 
-特别感谢 Miracle 及所有参与 DST Management Platform 开发和维护的贡献者。
+---
+
+<p align="center">
+  <strong>DST DMP Android</strong>
+</p><p align="center">
+  Android adaptation for DST Management Platform
+</p>
