@@ -118,32 +118,4 @@ Third-party components remain subject to the warranty disclaimers and liability 
 
 The inclusion of third-party notices in this file does not modify the terms of the applicable upstream licenses.
 
-For the complete license terms of the upstream MIT-licensed components, refer to the corresponding files in the "LICENSES" directory.client for the DST Management Platform API.
-
-Any code or other material derived from this upstream project remains subject
-to the applicable license and copyright notices of the upstream project.
-
-## Modifications and Android Project
-
-Android adaptation and additional development:
-
-https://github.com/stamrit/dst-dmp-apk
-
-Android-specific code, integrations, user interface adaptations, Android
-bridges, and other original portions of this repository were created or
-modified specifically for this project.
-
-Unless otherwise stated, these original portions are subject to the license
-terms in the root LICENSE file.
-
-Attribution to the upstream projects does not imply endorsement of this
-Android project by their authors.
-
-## Disclaimer
-
-This is an unofficial third-party Android project.
-
-This project is not affiliated with or endorsed by Klei Entertainment.
-
-Don't Starve Together and related names, trademarks, and assets are the
-property of their respective owners.
+For the complete license terms of the upstream MIT-licensed components, refer to the corresponding files in the "LICENSES" directory.
