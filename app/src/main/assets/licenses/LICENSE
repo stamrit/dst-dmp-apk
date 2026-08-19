@@ -1,0 +1,47 @@
+License
+
+Copyright (c) 2026 stamrit
+
+All rights reserved for the original Android-specific code, modifications, integrations, user interface adaptations, and other original work created specifically for the "dst-dmp-apk" project, unless otherwise stated.
+
+This repository contains software, frontend resources, and/or derivative works originating from third-party open-source projects.
+
+Third-Party Components
+
+Portions of this project are based on or adapted from:
+
+DST Management Platform API
+
+Original project:
+
+https://github.com/MiracleEverywhere/dst-management-platform-api
+
+Those portions remain subject to the license terms and copyright notices of the original project, including the MIT License where applicable.
+
+Nothing in this license is intended to remove, restrict, replace, or supersede any rights granted under the licenses of third-party components included in this repository.
+
+The applicable third-party notices are documented in:
+
+"THIRD_PARTY_NOTICES.md"
+
+Original Work in This Repository
+
+Except for third-party components and portions derived from them, the Android-specific code and other original material created specifically for "dst-dmp-apk" are not licensed for redistribution, modification, sublicensing, or commercial use without prior permission from the copyright holder.
+
+Viewing and studying the publicly available source code is permitted.
+
+No Endorsement
+
+This project is an unofficial third-party Android project.
+
+References to upstream open-source projects are provided for attribution and license compliance and do not imply endorsement by their original authors.
+
+This project is not affiliated with or endorsed by Klei Entertainment.
+
+Don't Starve Together and related names, trademarks, and assets are the property of their respective owners.
+
+Disclaimer
+
+THE ORIGINAL WORK PROVIDED BY THIS PROJECT IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW.
+
+Third-party components remain subject to their respective licenses and warranty disclaimers.

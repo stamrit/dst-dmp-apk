@@ -6,6 +6,23 @@ android {
     namespace 'cn.xiaojie_gjs.dmp'
     compileSdk 34
 
+    def signingPropertiesFile = rootProject.file('keystore.properties')
+    def signingProperties = new Properties()
+    if (signingPropertiesFile.exists()) {
+        signingProperties.load(new FileInputStream(signingPropertiesFile))
+    }
+
+    signingConfigs {
+        release {
+            if (signingPropertiesFile.exists()) {
+                storeFile rootProject.file(signingProperties['storeFile'])
+                storePassword signingProperties['storePassword']
+                keyAlias signingProperties['keyAlias']
+                keyPassword signingProperties['keyPassword']
+            }
+        }
+    }
+
     defaultConfig {
         applicationId 'cn.xiaojie_gjs.dmp'
         minSdk 29
@@ -17,6 +34,9 @@ android {
     buildTypes {
         release {
             minifyEnabled false
+            if (signingPropertiesFile.exists()) {
+                signingConfig signingConfigs.release
+            }
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }

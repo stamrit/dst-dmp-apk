@@ -5,3 +5,6 @@ local.properties
 .idea/
 app/build/
 tools/gh/
+*.jks
+*.keystore
+keystore.properties
