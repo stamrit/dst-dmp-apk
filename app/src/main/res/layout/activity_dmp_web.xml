@@ -30,7 +30,7 @@
                 android:layout_height="wrap_content"
                 android:fontFamily="sans-serif-black"
                 android:text="@string/dmp_error_title"
-                android:textColor="@color/dmp_text_primary"
+                android:textColor="@color/home_text_primary"
                 android:textSize="23sp" />
 
             <TextView
@@ -39,7 +39,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:gravity="center"
-                android:textColor="@color/dmp_text_muted"
+                android:textColor="@color/home_text_muted"
                 android:textSize="13sp" />
 
             <com.google.android.material.button.MaterialButton
@@ -49,7 +49,7 @@
                 android:layout_marginTop="26dp"
                 android:text="@string/dmp_retry"
                 android:textAllCaps="false"
-                app:backgroundTint="@color/dmp_primary"
+                app:backgroundTint="@color/home_primary"
                 app:cornerRadius="15dp" />
 
             <com.google.android.material.button.MaterialButton
@@ -60,9 +60,9 @@
                 android:layout_marginTop="10dp"
                 android:text="@string/dmp_change_server"
                 android:textAllCaps="false"
-                android:textColor="@color/dmp_primary"
+                android:textColor="@color/home_primary"
                 app:cornerRadius="15dp"
-                app:strokeColor="@color/dmp_primary" />
+                app:strokeColor="@color/home_primary" />
         </LinearLayout>
 
         <ProgressBar
@@ -72,6 +72,6 @@
             android:layout_height="3dp"
             android:layout_gravity="top"
             android:max="100"
-            android:progressTint="@color/dmp_primary" />
+            android:progressTint="@color/home_primary" />
     </FrameLayout>
 </LinearLayout>

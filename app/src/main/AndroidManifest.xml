@@ -12,12 +12,12 @@
         android:usesCleartextTraffic="true">
 
         <activity
-            android:name="cn.xiaojie_gjs.bianjiemj.ui.dmp.DmpWebActivity"
+            android:name="cn.xiaojie_gjs.dmp.ui.dmp.DmpWebActivity"
             android:configChanges="keyboardHidden|orientation|screenSize|smallestScreenSize"
             android:exported="false" />
 
         <activity
-            android:name="cn.xiaojie_gjs.bianjiemj.ui.dmp.DmpActivity"
+            android:name="cn.xiaojie_gjs.dmp.ui.dmp.DmpActivity"
             android:configChanges="keyboardHidden|orientation|screenSize|smallestScreenSize"
             android:exported="true">
             <intent-filter>

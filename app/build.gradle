@@ -28,7 +28,7 @@ android {
         minSdk 29
         targetSdk 34
         versionCode 1
-        versionName '1.0'
+        versionName 'V3.05.041828'
     }
 
     buildTypes {

@@ -19,4 +19,8 @@
     <color name="dmp_input">#FAF9FD</color>
     <color name="dmp_input_stroke">#B8B1CA</color>
     <color name="dmp_track">#DDD8E8</color>
+    <!-- Shared aliases used by the WebView error state in the extracted app. -->
+    <color name="home_primary">#7B46EA</color>
+    <color name="home_text_primary">#27223B</color>
+    <color name="home_text_muted">#918AA4</color>
 </resources>

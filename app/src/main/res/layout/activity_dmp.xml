@@ -15,16 +15,6 @@
         android:paddingStart="10dp"
         android:paddingEnd="10dp">
 
-        <ImageButton
-            android:id="@+id/dmp_back"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/dmp_back"
-            android:padding="13dp"
-            android:src="@android:drawable/ic_media_previous"
-            app:tint="@color/dmp_text_primary" />
-
         <ImageView
             android:layout_width="42dp"
             android:layout_height="42dp"
@@ -61,15 +51,32 @@
                 android:textSize="11sp" />
         </LinearLayout>
 
-        <ImageButton
-            android:id="@+id/dmp_download_tasks"
+        <LinearLayout
             android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/dmp_download_tasks"
-            android:padding="11dp"
-            android:src="@drawable/ic_dmp_download_tasks"
-            app:tint="@color/dmp_primary_text" />
+            android:layout_height="wrap_content"
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
+
+            <ImageButton
+                android:id="@+id/dmp_download_tasks"
+                android:layout_width="44dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/dmp_download_tasks"
+                android:padding="10dp"
+                android:src="@drawable/ic_dmp_download_tasks"
+                app:tint="@color/dmp_primary_text" />
+
+            <ProgressBar
+                android:id="@+id/dmp_download_progress"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="32dp"
+                android:layout_height="3dp"
+                android:max="100"
+                android:progress="0"
+                android:progressTint="@color/dmp_primary_text"
+                android:visibility="gone" />
+        </LinearLayout>
 
         <ImageButton
             android:id="@+id/dmp_update_servers"
@@ -93,16 +100,6 @@
             android:textSize="13sp" />
 
         <ImageButton
-            android:id="@+id/dmp_refresh_all"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/dmp_refresh_all"
-            android:padding="12dp"
-            android:src="@android:drawable/ic_popup_sync"
-            app:tint="@color/dmp_primary" />
-
-        <ImageButton
             android:id="@+id/dmp_theme_toggle"
             android:layout_width="44dp"
             android:layout_height="44dp"
@@ -118,16 +115,22 @@
         android:layout_height="0dp"
         android:layout_weight="1">
 
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/dmp_server_list"
+        <cn.xiaojie_gjs.dmp.ui.dmp.DmpPullRefreshLayout
+            android:id="@+id/dmp_refresh_layout"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:background="@color/dmp_page"
-            android:clipToPadding="false"
-            android:paddingStart="18dp"
-            android:paddingTop="18dp"
-            android:paddingEnd="18dp"
-            android:paddingBottom="26dp" />
+            android:layout_height="match_parent">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/dmp_server_list"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@color/dmp_page"
+                android:clipToPadding="false"
+                android:paddingStart="18dp"
+                android:paddingTop="18dp"
+                android:paddingEnd="18dp"
+                android:paddingBottom="26dp" />
+        </cn.xiaojie_gjs.dmp.ui.dmp.DmpPullRefreshLayout>
 
         <com.google.android.material.progressindicator.CircularProgressIndicator
             android:id="@+id/dmp_room_loading"
