@@ -1,0 +1,635 @@
+/* Old DMP mobile configuration layout over the 3.2 setting component. */
+/* The generated 3.2 row keeps `cols="12"` on both columns.  On a phone
+   that makes the detail card take a full flex line and pushes the custom
+   icon strip outside the viewport.  Keep the two panes in one predictable
+   flex row, then let the detail pane consume the remaining width. */
+/* The official 3.2 setting chunk dropped the scoped CSS that accompanied the
+   author's two-pane component.  Keep the small amount of structural CSS here
+   as well as the phone overrides below; otherwise the stamped classes exist
+   but the row/card collapses to its desktop block flow. */
+body.dmp-android-mod-config-enabled .mod-setting-shell {
+  display: flex !important;
+  flex-direction: column !important;
+  min-height: 280px !important;
+  overflow: hidden !important;
+}
+
+/* A wide portrait tablet has room for the official single-row catalogue.
+   The compact two-row grid above remains active on phones; this later rule
+   deliberately restores normal Vuetify table flow for the wide marker set by
+   dmp-android-ui-polish.js. */
+body.android-table-wide.dmp-android-mod-add .android-mod-add-table .v-data-table__wrapper,
+body.android-table-wide.dmp-android-mod-add .android-mod-add-table .v-table__wrapper {
+  overflow-x: auto !important;
+  width: 100% !important;
+  margin-inline: 0 !important;
+  padding-inline: 0 !important;
+}
+
+body.android-table-wide.dmp-android-mod-add .android-mod-add-table table {
+  display: table !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  table-layout: auto !important;
+}
+
+body.android-table-wide.dmp-android-mod-add .android-mod-add-table thead {
+  display: table-header-group !important;
+  width: auto !important;
+}
+
+body.android-table-wide.dmp-android-mod-add .android-mod-add-table tbody {
+  display: table-row-group !important;
+  width: auto !important;
+}
+
+body.android-table-wide.dmp-android-mod-add .android-mod-add-table tr {
+  display: table-row !important;
+  width: auto !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  grid-template-columns: none !important;
+  grid-template-rows: none !important;
+  column-gap: 0 !important;
+  row-gap: 0 !important;
+}
+
+body.android-table-wide.dmp-android-mod-add .android-mod-add-table th,
+body.android-table-wide.dmp-android-mod-add .android-mod-add-table td {
+  display: table-cell !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: auto !important;
+  min-height: 0 !important;
+  padding: 8px 10px !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  vertical-align: middle !important;
+  grid-column: auto !important;
+  grid-row: auto !important;
+  justify-content: initial !important;
+}
+
+body.android-table-wide.dmp-android-mod-add .android-mod-add-table thead th {
+  min-height: 0 !important;
+  height: auto !important;
+  padding-block: 8px !important;
+  line-height: 20px !important;
+}
+
+/* Some Android WebViews insert one extra v-row inside the selector
+   container.  Keep the old icon-strip sizing on descendant tiles as well as
+   direct children; otherwise only the first wrapper remains visible. */
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-icon-strip {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  overflow: auto hidden !important;
+  /* Keep the bottom selector as its own horizontal touch surface on Android
+     WebView instead of handing the gesture to the page scroller. */
+  touch-action: pan-x !important;
+  -webkit-overflow-scrolling: touch !important;
+  overscroll-behavior-x: contain !important;
+  overscroll-behavior-y: none !important;
+  pointer-events: auto !important;
+}
+
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-icon-strip .mod-icon-button {
+  position: relative !important;
+  display: grid !important;
+  place-items: center !important;
+  flex: 0 0 76px !important;
+  width: 76px !important;
+  min-width: 76px !important;
+  height: 76px !important;
+  min-height: 76px !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+}
+
+/* The old mobile build keeps the selector pane on the left as soon as the
+   viewport is in landscape.  A phone in landscape can report only ~700 CSS
+   pixels, so the former 900px guard incorrectly sent the selector back below
+   the form on smaller tablets/phones. */
+@media (orientation: landscape) and (min-width: 600px) {
+  body.dmp-android-mod-config-enabled .mod-setting-shell .mod-icon-strip {
+    flex-direction: column !important;
+    overflow: hidden auto !important;
+  }
+
+  body.dmp-android-mod-config-enabled .mod-setting-shell .mod-icon-strip .mod-icon-button {
+    flex-basis: 78px !important;
+    width: 78px !important;
+    min-width: 78px !important;
+    height: 78px !important;
+    min-height: 78px !important;
+  }
+}
+
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-world-picker {
+  min-height: 44px !important;
+  margin-block-end: 4px !important;
+}
+
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-config-layout {
+  display: flex !important;
+  flex-direction: column !important;
+  flex-wrap: nowrap !important;
+  align-items: stretch !important;
+  flex: 1 1 auto !important;
+  height: auto !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  width: 100% !important;
+  margin-inline: 0 !important;
+  padding-inline: 0 !important;
+  gap: 10px !important;
+}
+
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-detail {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 auto !important;
+  order: 1 !important;
+  gap: 8px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+}
+
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-config-layout > .mod-detail {
+  order: 1 !important;
+  flex: 1 1 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  padding-inline: 0 !important;
+}
+
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-detail > :first-child {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-selected-name {
+  display: flex !important;
+  flex: 0 0 42px !important;
+  min-width: 0 !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  padding-inline: 14px !important;
+  border-radius: 14px !important;
+  color: rgb(var(--v-theme-primary)) !important;
+  background: rgba(var(--v-theme-primary), .11) !important;
+  font-weight: 600 !important;
+}
+
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-selected-name span {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-selected-name.empty {
+  color: rgba(var(--v-theme-on-surface), .62) !important;
+  background: rgba(var(--v-theme-on-surface), .06) !important;
+}
+
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-config-layout > .mod-picker {
+  display: flex !important;
+  flex: 0 0 92px !important;
+  order: 2 !important;
+  min-width: 0;
+  padding: 7px !important;
+  border-radius: 18px;
+  overflow: hidden;
+  touch-action: pan-x !important;
+  pointer-events: auto !important;
+}
+
+/* In portrait the original mobile design puts the selector strip after the
+   detail card.  It spans the available width (the 92px value is its height),
+   while the strip itself scrolls horizontally through the icon tiles. */
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-picker {
+  width: 100% !important;
+  max-width: none !important;
+  height: 92px !important;
+  min-height: 92px !important;
+  touch-action: pan-x !important;
+  pointer-events: auto !important;
+}
+
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-picker > .v-card,
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-picker > .v-card > .v-card-text,
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-picker .mod-icon-strip {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-picker > .v-card {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  box-shadow: none;
+}
+
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-picker .v-card-title {
+  display: none !important;
+}
+
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-picker .v-card-text {
+  height: 100% !important;
+  padding: 0 !important;
+}
+
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-icon-strip {
+  display: flex !important;
+  width: 100%;
+  height: 100% !important;
+  gap: 10px;
+  overflow: auto hidden !important;
+  touch-action: pan-x !important;
+  -webkit-overflow-scrolling: touch !important;
+  overscroll-behavior-x: contain !important;
+  overscroll-behavior-y: none !important;
+  pointer-events: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  scroll-snap-type: inline proximity;
+}
+
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-icon-strip > .mod-icon-button,
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-icon-strip > button[role="tab"] {
+  position: relative;
+  display: grid !important;
+  flex: 0 0 76px !important;
+  width: 76px !important;
+  height: 76px !important;
+  min-height: 76px !important;
+  padding: 4px !important;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: 16px;
+  background: rgba(var(--v-theme-on-surface), .05);
+  cursor: pointer;
+  scroll-snap-align: center;
+}
+
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-icon-strip > .mod-icon-button.selected,
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-icon-strip > button[role="tab"]:focus-visible {
+  border-color: rgb(var(--v-theme-primary));
+  box-shadow: 0 0 0 3px rgba(var(--v-theme-primary), .16), 0 7px 18px rgba(var(--v-theme-primary), .22);
+}
+
+/* The current setting chunk wraps each .fcc entry in a 120px helper div.
+   The wrapper is the icon tile; keep the original click target and contents
+   inside it, but make the tile fill the compact strip. */
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-icon-strip > .mod-icon-button > .mod-icon-content {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+}
+
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-icon-button .w-33,
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-icon-button .w-33 .v-img {
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+}
+
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-icon-button .w-66,
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-icon-button .v-selection-control,
+body.dmp-android-mod-config-enabled .mod-setting-shell .mod-icon-button > .v-divider {
+  display: none !important;
+}
+
+/* The old mobile mod catalogue paints progress on the card itself.  The
+   queue still reports exact values from DMP 3.2; this mask only restores the
+   visual treatment and does not intercept the card or its buttons. */
+body.dmp-android-mod-config-enabled .dmp-mod-progress-card {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background-color: rgb(var(--v-theme-surface)) !important;
+}
+
+body.dmp-android-mod-config-enabled .dmp-mod-progress-card::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  inset: 0 auto 0 0;
+  width: var(--dmp-download-progress, 0%);
+  background: rgba(144, 210, 255, .58);
+  pointer-events: none;
+  transition: width .25s ease;
+}
+
+body.dmp-android-mod-config-enabled .dmp-mod-progress-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+body.dmp-android-mod-config-enabled .dmp-mod-progress-card.dmp-download-indeterminate::before {
+  width: 42%;
+  animation: dmp-mod-progress-sweep 1.1s ease-in-out infinite alternate;
+}
+
+@keyframes dmp-mod-progress-sweep {
+  from { transform: translateX(-55%); }
+  to { transform: translateX(135%); }
+}
+
+@media (orientation: landscape) and (min-width: 600px) {
+  body.dmp-android-mod-config-enabled .mod-setting-shell .mod-config-layout {
+    flex-direction: row !important;
+    align-items: stretch;
+  }
+
+  body.dmp-android-mod-config-enabled .mod-setting-shell .mod-config-layout > .mod-picker {
+    flex: 0 0 96px !important;
+    order: 0 !important;
+    width: 96px !important;
+    padding: 8px !important;
+  }
+
+  body.dmp-android-mod-config-enabled .mod-setting-shell .mod-icon-strip {
+    flex-direction: column;
+    overflow: hidden auto !important;
+    touch-action: pan-y !important;
+    -webkit-overflow-scrolling: touch !important;
+    overscroll-behavior-x: none !important;
+    overscroll-behavior-y: contain !important;
+    scroll-snap-type: block proximity;
+  }
+
+  body.dmp-android-mod-config-enabled .mod-setting-shell .mod-picker {
+    touch-action: pan-y !important;
+    overscroll-behavior-y: contain !important;
+  }
+
+  body.dmp-android-mod-config-enabled .mod-setting-shell .mod-icon-strip > .mod-icon-button,
+  body.dmp-android-mod-config-enabled .mod-setting-shell .mod-icon-strip > button[role="tab"] {
+    flex-basis: 78px !important;
+    width: 78px !important;
+    height: 78px !important;
+  }
+
+  body.dmp-android-mod-config-enabled .mod-setting-shell .mod-config-layout > .mod-detail {
+    order: 0 !important;
+    min-width: 0;
+  }
+}
+
+/* TMI ("更多物品") uses the same two-pane row as the desktop web page.  The
+   upstream chunk already emits `md=8` and `md=4`; force those tracks for a
+   landscape tablet whose WebView width falls just below Vuetify's md
+   breakpoint.  The marker is applied only on the TMI route while the menu is
+   closed, so phones and the open navigation drawer retain the normal stack. */
+body.dmp-android-tmi-wide .tmi-layout-root {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: stretch !important;
+  min-width: 0 !important;
+  width: 100% !important;
+}
+
+/* Vuetify's generated columns do not always include the bare `v-col`
+   class; compact builds commonly emit only `v-col-12 v-col-md-8` (and the
+   matching `v-col-md-4`).  The previous bare-class selector therefore missed
+   both tracks on the Android tablet, leaving the catalogue at 100% width and
+   clipping the command panel to the far right edge.  Match the generated
+   responsive class names on direct children instead. */
+body.dmp-android-tmi-wide .tmi-layout-root > [class*="v-col"] {
+  box-sizing: border-box !important;
+  min-width: 0 !important;
+}
+
+body.dmp-android-tmi-wide .tmi-layout-root > [class*="v-col"]:nth-child(1),
+body.dmp-android-tmi-wide .tmi-layout-root > [class*="v-col-md-8"] {
+  flex: 0 0 66.666667% !important;
+  width: 66.666667% !important;
+  max-width: 66.666667% !important;
+}
+
+body.dmp-android-tmi-wide .tmi-layout-root > [class*="v-col"]:nth-child(2),
+body.dmp-android-tmi-wide .tmi-layout-root > [class*="v-col-md-4"] {
+  flex: 0 0 33.333333% !important;
+  width: 33.333333% !important;
+  max-width: 33.333333% !important;
+}
+
+/* Mobile mod catalogue/add page.  The desktop table has seven columns, but
+   on a phone each catalogue entry reads more naturally as two compact rows:
+   checkbox + preview occupy both rows, the name spans the two middle cells,
+   and size / ID / version / actions stay aligned at the right. */
+/* The Android tablet WebView commonly reports a 1024–1280px CSS viewport
+   even when the physical screen is much larger.  Keep the same two-line
+   catalogue layout up to that width; otherwise the desktop table lets the
+   name column absorb all free space and squeezes the size/action cells. */
+@media (max-width: 1280px) {
+  body.dmp-android-mod-add .android-mod-add-table .v-data-table__wrapper,
+  body.dmp-android-mod-add .android-mod-add-table .v-table__wrapper {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    overscroll-behavior-x: contain !important;
+    /* The catalogue card keeps the desktop table's generous card inset.  On
+       a phone that inset consumes the same pixels needed by the name and
+       action columns, making every row look squeezed.  Let the mobile table
+       use the card's full content width while retaining a small, even edge
+       gutter. */
+    width: calc(100% + 32px) !important;
+    margin-inline: -16px !important;
+    padding-inline: 8px !important;
+    box-sizing: border-box !important;
+  }
+
+  body.dmp-android-mod-add .android-mod-add-table table {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    /* Match the Android dashboard table approach: reserve a readable
+       minimum track and let a narrow phone scroll to the right. */
+    min-width: 646px !important;
+    table-layout: fixed !important;
+  }
+
+  body.dmp-android-mod-add .android-mod-add-table thead,
+  body.dmp-android-mod-add .android-mod-add-table tbody {
+    display: block !important;
+    width: 100% !important;
+  }
+
+  body.dmp-android-mod-add .android-mod-add-table thead > tr,
+  body.dmp-android-mod-add .android-mod-add-table tbody > tr {
+    display: grid !important;
+    /* Keep the name chip bounded and give size/actions their own readable
+       tracks.  The final flexible track is an empty spacer on a tablet so
+       the row still fills the card without stretching the name cell. */
+     /* The name cell spans tracks 3+4 (the second row uses those tracks for
+        ID and version).  Keeping those tracks fixed prevents the grid from
+        handing all of the table's spare width to the name chip; the old
+        minmax(170px,240px)+minmax(120px,150px) pair expanded to roughly
+        382px on a tablet and left the size column at only 96px.  Reserve a
+        readable size/action track and leave any remaining width as a spacer. */
+     grid-template-columns: 40px 88px 110px 120px 130px minmax(0, 1fr) !important;
+    grid-template-rows: minmax(38px, auto) minmax(38px, auto) !important;
+    align-items: center !important;
+    width: 100% !important;
+    min-width: 646px !important;
+    min-height: 76px !important;
+    /* Leave a small breathing margin at both edges and between cells.  The
+       previous full-width grid made the checkbox/preview and action columns
+       touch the card edges on narrow phones, so the catalogue looked cramped
+       even though the two-row layout itself was correct. */
+    padding-inline: 8px !important;
+    column-gap: 6px !important;
+    box-sizing: border-box !important;
+  }
+
+  body.dmp-android-mod-add .android-mod-add-table thead > tr {
+    min-height: 72px !important;
+    background: rgb(var(--v-table-header-color)) !important;
+    border-bottom: 1px solid rgba(var(--v-border-color), .16) !important;
+  }
+
+  body.dmp-android-mod-add .android-mod-add-table tbody > tr {
+    padding-block: 4px !important;
+    border-bottom: 1px solid rgba(var(--v-border-color), .16) !important;
+  }
+
+  body.dmp-android-mod-add .android-mod-add-table th,
+  body.dmp-android-mod-add .android-mod-add-table td {
+    display: flex !important;
+    align-items: center !important;
+    min-width: 0 !important;
+    width: auto !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 36px !important;
+    padding: 4px 8px !important;
+    box-sizing: border-box !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+  }
+
+  body.dmp-android-mod-add .android-mod-add-table th:nth-child(1),
+  body.dmp-android-mod-add .android-mod-add-table td:nth-child(1) {
+    grid-column: 1 !important;
+    grid-row: 1 / span 2 !important;
+    justify-content: center !important;
+  }
+
+  body.dmp-android-mod-add .android-mod-add-table th:nth-child(2),
+  body.dmp-android-mod-add .android-mod-add-table td:nth-child(2) {
+    grid-column: 2 !important;
+    grid-row: 1 / span 2 !important;
+    justify-content: center !important;
+    padding: 4px 6px !important;
+  }
+
+  body.dmp-android-mod-add .android-mod-add-table th:nth-child(3),
+  body.dmp-android-mod-add .android-mod-add-table td:nth-child(3) {
+    grid-column: 3 / span 2 !important;
+    grid-row: 1 !important;
+    min-width: 0 !important;
+  }
+
+  body.dmp-android-mod-add .android-mod-add-table th:nth-child(4),
+  body.dmp-android-mod-add .android-mod-add-table td:nth-child(4) {
+    grid-column: 5 !important;
+    grid-row: 1 !important;
+    justify-content: flex-end !important;
+  }
+
+  body.dmp-android-mod-add .android-mod-add-table th:nth-child(5),
+  body.dmp-android-mod-add .android-mod-add-table td:nth-child(5) {
+    grid-column: 3 !important;
+    grid-row: 2 !important;
+  }
+
+  body.dmp-android-mod-add .android-mod-add-table th:nth-child(6),
+  body.dmp-android-mod-add .android-mod-add-table td:nth-child(6) {
+    grid-column: 4 !important;
+    grid-row: 2 !important;
+  }
+
+  body.dmp-android-mod-add .android-mod-add-table th:nth-child(7),
+  body.dmp-android-mod-add .android-mod-add-table td:nth-child(7) {
+    grid-column: 5 !important;
+    grid-row: 2 !important;
+    justify-content: flex-end !important;
+  }
+
+  body.dmp-android-mod-add .android-mod-add-table td:nth-child(2) .v-img,
+  body.dmp-android-mod-add .android-mod-add-table td:nth-child(2) img {
+    width: 66px !important;
+    height: 66px !important;
+    max-width: 66px !important;
+    max-height: 66px !important;
+    border-radius: 8px !important;
+    object-fit: cover !important;
+  }
+
+  body.dmp-android-mod-add .android-mod-add-table td:nth-child(3) .v-chip,
+  body.dmp-android-mod-add .android-mod-add-table td:nth-child(4) .v-chip,
+  body.dmp-android-mod-add .android-mod-add-table td:nth-child(5) .v-chip,
+  body.dmp-android-mod-add .android-mod-add-table td:nth-child(6) .v-chip {
+    max-width: 100% !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  body.dmp-android-mod-add .android-mod-add-table td:nth-child(3) .v-chip {
+    width: auto !important;
+    max-width: 100% !important;
+    justify-content: flex-start !important;
+  }
+
+  body.dmp-android-mod-add .android-mod-add-table td:nth-child(7) .v-btn {
+    min-width: 0 !important;
+    max-width: 72px !important;
+    padding-inline: 6px !important;
+  }
+
+  /* The upstream Vuetify table paints a border on every cell.  With the
+     two-line catalogue grid that creates broken horizontal rules under each
+     chip (and, on some WebViews, a second vertical rule at every track).
+     Keep one separator per logical row and remove the cell-level decoration. */
+  body.dmp-android-mod-add .android-mod-add-table table,
+  body.dmp-android-mod-add .android-mod-add-table thead,
+  body.dmp-android-mod-add .android-mod-add-table tbody,
+  body.dmp-android-mod-add .android-mod-add-table tr,
+  body.dmp-android-mod-add .android-mod-add-table th,
+  body.dmp-android-mod-add .android-mod-add-table td {
+    border-top: 0 !important;
+    border-left: 0 !important;
+    border-right: 0 !important;
+    border-bottom: 0 !important;
+    box-shadow: none !important;
+  }
+
+  body.dmp-android-mod-add .android-mod-add-table th::before,
+  body.dmp-android-mod-add .android-mod-add-table th::after,
+  body.dmp-android-mod-add .android-mod-add-table td::before,
+  body.dmp-android-mod-add .android-mod-add-table td::after {
+    display: none !important;
+    content: none !important;
+  }
+
+  body.dmp-android-mod-add .android-mod-add-table tbody > tr {
+    border-bottom: 1px solid rgba(var(--v-border-color), .16) !important;
+  }
+}

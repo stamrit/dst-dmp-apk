@@ -1,5 +1,7 @@
 package cn.xiaojie_gjs.dmp.ui.dmp;
 
+import android.content.Context;
+import android.graphics.drawable.GradientDrawable;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -19,6 +21,7 @@ public class DmpRoomAdapter extends RecyclerView.Adapter<DmpRoomAdapter.RoomView
 
     public interface Listener {
         void onOpenRoom(DmpRoom room);
+        void onRoomActions(DmpRoom room);
         void onCreateRoom();
     }
 
@@ -56,9 +59,11 @@ public class DmpRoomAdapter extends RecyclerView.Adapter<DmpRoomAdapter.RoomView
         }
         DmpRoom room = rooms.get(position);
         holder.title.setText(room.gameName);
+        holder.runningState.setText(room.running
+                ? R.string.dmp_room_running : R.string.dmp_room_stopped);
+        applyStatusChip(holder.runningState, room.running);
         holder.state.setText(room.online ? R.string.dmp_room_online : R.string.dmp_room_offline);
-        holder.state.setTextColor(ContextCompat.getColor(holder.itemView.getContext(),
-                room.online ? R.color.dmp_green : R.color.dmp_warning));
+        applyStatusChip(holder.state, room.online);
         String serverName = room.server.remark.isEmpty() ? room.server.host : room.server.remark;
         holder.server.setText(holder.itemView.getContext().getString(
                 R.string.dmp_room_server_value, serverName));
@@ -78,7 +83,50 @@ public class DmpRoomAdapter extends RecyclerView.Adapter<DmpRoomAdapter.RoomView
                 room.worldCount,
                 room.onlinePlayers,
                 room.maxPlayers));
+        if (holder.operation != null) {
+            // The room card itself opens the room. Consume the operation
+            // button's touch sequence explicitly so a tap on 操作 cannot
+            // bubble through the card and open the control page as well.
+            // Calling performClick() on ACTION_UP preserves the normal
+            // accessibility/click contract while keeping the two actions
+            // mutually exclusive.
+            holder.operation.setOnTouchListener((v, event) -> {
+                switch (event.getActionMasked()) {
+                    case android.view.MotionEvent.ACTION_DOWN:
+                        v.setPressed(true);
+                        return true;
+                    case android.view.MotionEvent.ACTION_UP:
+                        v.setPressed(false);
+                        v.performClick();
+                        return true;
+                    case android.view.MotionEvent.ACTION_CANCEL:
+                        v.setPressed(false);
+                        return true;
+                    default:
+                        return true;
+                }
+            });
+            holder.operation.setOnClickListener(v -> listener.onRoomActions(room));
+        }
         holder.itemView.setOnClickListener(v -> listener.onOpenRoom(room));
+    }
+
+    /** Apply both the text and the state-specific surface to a room chip. */
+    private void applyStatusChip(@NonNull TextView chip, boolean positive) {
+        int color = ContextCompat.getColor(chip.getContext(),
+                positive ? R.color.dmp_green : R.color.dmp_warning);
+        int surface = ContextCompat.getColor(chip.getContext(),
+                positive ? R.color.dmp_green_surface : R.color.dmp_warning_surface);
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(surface);
+        background.setStroke(dp(chip.getContext(), 1), color);
+        background.setCornerRadius(dp(chip.getContext(), 9));
+        chip.setBackground(background);
+        chip.setTextColor(color);
+    }
+
+    private int dp(Context context, int value) {
+        return Math.round(value * context.getResources().getDisplayMetrics().density);
     }
 
     @Override
@@ -93,20 +141,24 @@ public class DmpRoomAdapter extends RecyclerView.Adapter<DmpRoomAdapter.RoomView
 
     static class RoomViewHolder extends RecyclerView.ViewHolder {
         final TextView title;
+        final TextView runningState;
         final TextView state;
         final TextView server;
         final TextView description;
         final TextView mode;
         final TextView worlds;
+        final View operation;
 
         RoomViewHolder(@NonNull View itemView) {
             super(itemView);
             title = itemView.findViewById(R.id.dmp_room_title);
+            runningState = itemView.findViewById(R.id.dmp_room_running_state);
             state = itemView.findViewById(R.id.dmp_room_state);
             server = itemView.findViewById(R.id.dmp_room_server);
             description = itemView.findViewById(R.id.dmp_room_description);
             mode = itemView.findViewById(R.id.dmp_room_mode);
             worlds = itemView.findViewById(R.id.dmp_room_worlds);
+            operation = itemView.findViewById(R.id.dmp_room_operation);
         }
     }
 }

@@ -36,6 +36,17 @@ public class DmpServer {
     public transient int dmpLocalVersion = 0;
     public transient int dmpLatestVersion = 0;
     public transient boolean dmpVersionKnown = false;
+    /**
+     * DMP platform version reported by this host's installed Web bundle.
+     * This is intentionally server-scoped: different hosts may still run
+     * different DMP releases.  An empty value means it has not been read (or
+     * the host did not expose a readable Web/version endpoint).
+     */
+    public transient String dmpInstalledVersion = "";
+    /** Monotonic time of the last installed-version probe. */
+    public transient long dmpInstalledVersionCheckedAt = 0L;
+    /** Guards against overlapping static bundle probes during refresh. */
+    public transient boolean dmpInstalledVersionProbeRunning = false;
 
     public DmpServer(
             String id,

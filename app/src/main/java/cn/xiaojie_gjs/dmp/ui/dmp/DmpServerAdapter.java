@@ -1,5 +1,7 @@
 package cn.xiaojie_gjs.dmp.ui.dmp;
 
+import android.content.res.ColorStateList;
+import android.graphics.drawable.GradientDrawable;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -78,6 +80,11 @@ public class DmpServerAdapter extends RecyclerView.Adapter<RecyclerView.ViewHold
                         && oldServer.worldCount == newServer.worldCount
                         && Double.compare(oldServer.cpu, newServer.cpu) == 0
                         && Double.compare(oldServer.memory, newServer.memory) == 0
+                        && oldServer.dmpLocalVersion == newServer.dmpLocalVersion
+                        && oldServer.dmpLatestVersion == newServer.dmpLatestVersion
+                        && oldServer.dmpVersionKnown == newServer.dmpVersionKnown
+                        && Objects.equals(oldServer.dmpInstalledVersion,
+                        newServer.dmpInstalledVersion)
                         && Objects.equals(oldServer.host, newServer.host)
                         && Objects.equals(oldServer.protocol, newServer.protocol)
                         && Objects.equals(oldServer.token, newServer.token)
@@ -130,16 +137,21 @@ public class DmpServerAdapter extends RecyclerView.Adapter<RecyclerView.ViewHold
     private void bindServer(ServerViewHolder holder, DmpServer server) {
         holder.title.setText(server.remark.isEmpty() ? holder.itemView.getContext()
                 .getString(R.string.dmp_no_remark) : server.remark);
-        if (server.dmpVersionKnown && server.dmpLocalVersion > 0) {
-            String version = "当前版本 · " + server.dmpLocalVersion;
-            if (server.dmpLatestVersion > server.dmpLocalVersion) {
-                version += " · 可更新";
-            }
-            holder.remark.setText(version);
+        if (server.dmpVersionKnown) {
+            String local = server.dmpLocalVersion > 0
+                    ? String.valueOf(server.dmpLocalVersion) : "读取中";
+            String installed = server.dmpInstalledVersion == null
+                    || server.dmpInstalledVersion.trim().isEmpty()
+                    ? "读取中" : server.dmpInstalledVersion.trim();
+            holder.remark.setText("当前版本 · " + local + " | dmp版本 · " + installed);
         } else {
-            holder.remark.setText("当前版本 · 读取中");
+            String installed = server.dmpInstalledVersion == null
+                    || server.dmpInstalledVersion.trim().isEmpty()
+                    ? "读取中" : server.dmpInstalledVersion.trim();
+            holder.remark.setText("当前版本 · 读取中 | dmp版本 · " + installed);
         }
         holder.address.setText(server.baseUrl());
+        applyAddressAppearance(holder, server.state);
         holder.enter.setOnClickListener(v -> listener.onEnter(server));
         holder.options.setOnClickListener(v -> showOptions(holder.options, server));
 
@@ -172,6 +184,49 @@ public class DmpServerAdapter extends RecyclerView.Adapter<RecyclerView.ViewHold
     private void setStatus(ServerViewHolder holder, int textResource, int colorResource) {
         holder.status.setText(textResource);
         holder.status.setTextColor(color(holder, colorResource));
+    }
+
+    /**
+     * The address is also the connection-state indicator on the server card.
+     * It used to be permanently green, which made an offline or still-loading
+     * host look healthy. Keep the HTTP text, icon, border and surface in sync
+     * with the same state used by the status line.
+     */
+    private void applyAddressAppearance(ServerViewHolder holder, int state) {
+        int surfaceResource;
+        int colorResource;
+        switch (state) {
+            case DmpServer.STATE_ONLINE:
+                surfaceResource = R.color.dmp_green_surface;
+                colorResource = R.color.dmp_green;
+                break;
+            case DmpServer.STATE_OFFLINE:
+                surfaceResource = R.color.dmp_warning_surface;
+                colorResource = R.color.dmp_warning;
+                break;
+            case DmpServer.STATE_LOADING:
+                surfaceResource = R.color.dmp_primary_soft;
+                colorResource = R.color.dmp_primary_text;
+                break;
+            case DmpServer.STATE_IDLE:
+            default:
+                surfaceResource = R.color.dmp_input;
+                colorResource = R.color.dmp_text_secondary;
+                break;
+        }
+        int color = color(holder, colorResource);
+        int surface = color(holder, surfaceResource);
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(surface);
+        background.setStroke(dp(holder.address, 1), color);
+        background.setCornerRadius(dp(holder.address, 9));
+        holder.address.setBackground(background);
+        holder.address.setTextColor(color);
+        holder.address.setCompoundDrawableTintList(ColorStateList.valueOf(color));
+    }
+
+    private int dp(View view, int value) {
+        return Math.round(value * view.getResources().getDisplayMetrics().density);
     }
 
     private int color(ServerViewHolder holder, int colorResource) {

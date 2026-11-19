@@ -4,7 +4,10 @@ import android.annotation.SuppressLint;
 import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.Intent;
+import android.provider.Settings;
 import android.graphics.Bitmap;
+import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
@@ -14,6 +17,7 @@ import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebStorage;
 import android.webkit.WebView;
@@ -25,6 +29,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.app.AppCompatDelegate;
+import androidx.webkit.WebViewAssetLoader;
 
 import cn.xiaojie_gjs.dmp.BuildConfig;
 import cn.xiaojie_gjs.dmp.R;
@@ -49,33 +54,54 @@ public class DmpWebActivity extends AppCompatActivity {
     public static final String EXTRA_SELECTED_ROOM_NAME = "dmp_selected_room_name";
     public static final String EXTRA_START_CREATE_ROOM = "dmp_start_create_room";
     public static final String EXTRA_NIGHT_MODE = "dmp_night_mode";
+    public static final String EXTRA_ANDROID_DOWNLOAD_UI = "dmp_android_download_ui";
+    public static final String EXTRA_ANDROID_MOD_CONFIG_UI = "dmp_android_mod_config_ui";
     /** True when this room was opened from native total-room management. */
     public static final String EXTRA_FROM_ROOM_MANAGEMENT = "dmp_from_room_management";
 
+    /** Local file origin used for the bundled DMP web application. */
+    private static final String LOCAL_ASSET_HOST = "appassets.androidplatform.net";
+    private static final String LOCAL_ASSET_BASE = "file:///android_asset/dmp_web/";
     private static final String ROOM_OVERVIEW_URL =
-            "file:///android_asset/dmp_web/index.html#/rooms";
+            LOCAL_ASSET_BASE + "index.html#/rooms";
     private static final String ROOM_CREATE_URL =
-            "file:///android_asset/dmp_web/index.html#/game/base";
+            LOCAL_ASSET_BASE + "index.html#/game/base";
     private static final String ROOM_DASHBOARD_URL =
-            "file:///android_asset/dmp_web/index.html#/dashboard";
-    private static final String LOCAL_ASSET_PREFIX = "file:///android_asset/dmp_web/";
+            LOCAL_ASSET_BASE + "index.html#/dashboard";
 
     private ActivityDmpWebBinding binding;
+    @Nullable
+    private WebViewAssetLoader assetLoader;
     private boolean mainFrameFailed;
     private boolean fromRoomManagement;
     private String initialUrl = ROOM_OVERVIEW_URL;
     @Nullable
     private ValueCallback<Uri[]> pendingFileCallback;
+    @Nullable
+    private DmpJavascriptBridge javascriptBridge;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         boolean nightMode = getIntent().getBooleanExtra(EXTRA_NIGHT_MODE, true);
+        boolean androidDownloadUi = getIntent().getBooleanExtra(EXTRA_ANDROID_DOWNLOAD_UI, true);
+        boolean androidModConfigUi = getIntent().getBooleanExtra(EXTRA_ANDROID_MOD_CONFIG_UI, true);
         getDelegate().setLocalNightMode(nightMode
                 ? AppCompatDelegate.MODE_NIGHT_YES
                 : AppCompatDelegate.MODE_NIGHT_NO);
+        // Set the Activity window surface before the first layout inflation;
+        // this also covers the short handoff from the native launcher to the
+        // WebView and prevents a white window behind the persistent underlay.
+        getWindow().setBackgroundDrawable(new ColorDrawable(themeBackground(nightMode)));
         super.onCreate(savedInstanceState);
         binding = ActivityDmpWebBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
+        // Keep one native, theme-colored surface underneath the WebView for
+        // the entire Activity lifetime.  Route changes and asset reloads may
+        // temporarily leave the WebView unpainted; a transparent WebView
+        // then exposes this underlay rather than flashing white.
+        int persistentBackground = themeBackground(nightMode);
+        binding.dmpPersistentBackground.setBackgroundColor(persistentBackground);
+        binding.getRoot().setBackgroundColor(persistentBackground);
 
         DmpServer server = readServer();
         if (server == null) {
@@ -93,12 +119,22 @@ public class DmpWebActivity extends AppCompatActivity {
         boolean persistRoomSelection = getIntent().getBooleanExtra(
                 EXTRA_PERSIST_ROOM_SELECTION, false);
         fromRoomManagement = getIntent().getBooleanExtra(EXTRA_FROM_ROOM_MANAGEMENT, false);
-        Log.d(TAG, "web entry server=" + server.id + " room=" + roomId
-                + " selected=" + selectedRoomId + " fromRooms=" + fromRoomManagement);
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "web entry server=" + server.id + " room=" + roomId
+                    + " selected=" + selectedRoomId + " fromRooms=" + fromRoomManagement);
+        }
         boolean startCreateRoom = getIntent().getBooleanExtra(EXTRA_START_CREATE_ROOM, false);
-        initialUrl = roomId > 0
-                ? ROOM_DASHBOARD_URL
-                : (startCreateRoom ? ROOM_CREATE_URL : ROOM_OVERVIEW_URL);
+        // Keep the original file:// entry point used by the old mobile DMP.
+        // The route catalogue is now available synchronously to the 3.2
+        // router guard, so direct room/create entry can retain its old target
+        // instead of first showing the platform overview.
+        if (roomId > 0) {
+            initialUrl = ROOM_DASHBOARD_URL;
+        } else if (startCreateRoom) {
+            initialUrl = ROOM_CREATE_URL;
+        } else {
+            initialUrl = ROOM_OVERVIEW_URL;
+        }
         String roomName = getIntent().getStringExtra(EXTRA_ROOM_NAME);
         if (roomName == null) {
             roomName = "";
@@ -106,7 +142,7 @@ public class DmpWebActivity extends AppCompatActivity {
         binding.dmpWebRetry.setOnClickListener(v -> loadInitialPage());
         binding.dmpWebChangeServer.setOnClickListener(v -> finish());
         configureWebView(server, roomId, roomName, selectedRoomId, selectedRoomName,
-                nightMode, persistRoomSelection);
+                nightMode, persistRoomSelection, androidDownloadUi, androidModConfigUi);
         loadInitialPage();
     }
 
@@ -129,6 +165,10 @@ public class DmpWebActivity extends AppCompatActivity {
                 intent.getStringExtra(EXTRA_SERVER_REMARK));
     }
 
+    private int themeBackground(boolean useNightMode) {
+        return Color.parseColor(useNightMode ? "#24213D" : "#F4F2FA");
+    }
+
     @SuppressLint({"SetJavaScriptEnabled", "JavascriptInterface"})
     private void configureWebView(
             DmpServer server,
@@ -137,27 +177,64 @@ public class DmpWebActivity extends AppCompatActivity {
             int selectedRoomId,
             String selectedRoomName,
             boolean nightMode,
-            boolean persistRoomSelection) {
+            boolean persistRoomSelection,
+            boolean androidDownloadUi,
+            boolean androidModConfigUi) {
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
         WebSettings settings = binding.dmpWebView.getSettings();
+        // The native persistent background is the fallback surface while the
+        // bundled page is loading.  The page's own html/body colors still
+        // paint normally once its document is ready.
+        binding.dmpWebView.setBackgroundColor(Color.TRANSPARENT);
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
+        // The DMP API is normally plain HTTP and does not emit CORS headers.
+        // Keep the trusted, bundled page on the legacy file origin so the
+        // WebView can call the selected server directly without a preflight
+        // being rejected by the DMP backend.  The page is loaded only from
+        // APK assets and external navigations are still blocked below.
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(false);
         settings.setAllowFileAccessFromFileURLs(true);
         settings.setAllowUniversalAccessFromFileURLs(true);
+        // The selected DMP hosts may be HTTP-only; the trusted APK page must
+        // be able to reach them from its file origin in release builds too.
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        settings.setBuiltInZoomControls(true);
+        // This is a responsive mobile UI, not a document viewer.  Leaving
+        // WebView's built-in zoom enabled makes a two-finger scroll gesture
+        // resize the whole page (especially on Huawei tablets), after which
+        // the toolbar and fixed overlays are laid out at the wrong scale.
+        // Keep normal one-/two-finger scrolling, but disable pinch zoom.
+        settings.setSupportZoom(false);
+        settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
         settings.setLoadWithOverviewMode(true);
         settings.setUseWideViewPort(true);
         CookieManager.getInstance().setAcceptCookie(true);
 
-        binding.dmpWebView.addJavascriptInterface(
-                new DmpJavascriptBridge(this, server, roomId, roomName, selectedRoomId,
-                        selectedRoomName, nightMode, persistRoomSelection),
-                "AndroidDmp");
+        // WebKit 1.6 exposes only the Context constructor for
+        // AssetsPathHandler.  Wrap it so each URL prefix is translated to
+        // the corresponding subdirectory in the APK's assets tree.
+        assetLoader = new WebViewAssetLoader.Builder()
+                // Normal page-relative resources: /dmp_web/index.html and
+                // /dmp_web/assets/*.js|css|woff2|...
+                .addPathHandler("/dmp_web/",
+                        new PrefixedAssetPathHandler(this, "dmp_web/"))
+                // Vite's preload map may resolve `assets/foo` from the origin
+                // root.  Alias that path back to the bundled DMP assets.
+                .addPathHandler("/assets/",
+                        new PrefixedAssetPathHandler(this, "dmp_web/assets/"))
+                // The bundle also references dmp.svg/favicon at its origin
+                // root on Android WebView; map those safely to dmp_web.
+                .addPathHandler("/",
+                        new PrefixedAssetPathHandler(this, "dmp_web/"))
+                .build();
+
+        javascriptBridge = new DmpJavascriptBridge(
+                this, server, roomId, roomName, selectedRoomId, selectedRoomName,
+                nightMode, persistRoomSelection, androidDownloadUi, androidModConfigUi);
+        binding.dmpWebView.addJavascriptInterface(javascriptBridge, "AndroidDmp");
         binding.dmpWebView.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onProgressChanged(WebView view, int newProgress) {
@@ -167,6 +244,11 @@ public class DmpWebActivity extends AppCompatActivity {
 
             @Override
             public boolean onConsoleMessage(ConsoleMessage consoleMessage) {
+                if (BuildConfig.DEBUG) {
+                    Log.e(TAG, "web console " + consoleMessage.messageLevel()
+                            + " " + consoleMessage.message() + " @"
+                            + consoleMessage.sourceId() + ":" + consoleMessage.lineNumber());
+                }
                 return super.onConsoleMessage(consoleMessage);
             }
 
@@ -209,8 +291,23 @@ public class DmpWebActivity extends AppCompatActivity {
                     @NonNull WebResourceRequest request) {
                 Uri uri = request.getUrl();
                 String url = uri.toString();
-                if (url.startsWith(LOCAL_ASSET_PREFIX) || "about:blank".equals(url)) {
+                // Backup exports are generated as a Blob URL by the desktop
+                // axios helper.  There is no Android app that can handle a
+                // blob: intent; the injected Android bridge has already
+                // handed the corresponding server endpoint to DownloadManager.
+                // Consume the synthetic navigation here so a failed fallback
+                // cannot show the misleading "没有可处理此链接的应用" toast.
+                if ("blob".equalsIgnoreCase(uri.getScheme())) {
+                    return true;
+                }
+                if (isLocalDmpUrl(uri) || "about:blank".equals(url)) {
                     return false;
+                }
+                // Do not turn arbitrary WebView navigations (intent:, file:,
+                // content:, javascript:, etc.) into Android intents.  Only
+                // ordinary web links leave the trusted bundled document.
+                if (!isHttpUrl(uri)) {
+                    return true;
                 }
                 openExternal(uri);
                 return true;
@@ -230,10 +327,43 @@ public class DmpWebActivity extends AppCompatActivity {
             }
 
             @Override
+            public WebResourceResponse shouldInterceptRequest(
+                    @NonNull WebView view,
+                    @NonNull WebResourceRequest request) {
+                WebViewAssetLoader loader = assetLoader;
+                if (loader != null) {
+                    WebResourceResponse response = loader.shouldInterceptRequest(request.getUrl());
+                    if (response != null) {
+                        return response;
+                    }
+                }
+                return super.shouldInterceptRequest(view, request);
+            }
+
+            @Override
+            public WebResourceResponse shouldInterceptRequest(
+                    @NonNull WebView view,
+                    @NonNull String url) {
+                WebViewAssetLoader loader = assetLoader;
+                if (loader != null) {
+                    WebResourceResponse response = loader.shouldInterceptRequest(Uri.parse(url));
+                    if (response != null) {
+                        return response;
+                    }
+                }
+                return super.shouldInterceptRequest(view, url);
+            }
+
+            @Override
             public void onReceivedError(
                     WebView view,
                     WebResourceRequest request,
                     WebResourceError error) {
+                if (BuildConfig.DEBUG) {
+                    Log.e(TAG, "web resource error main=" + request.isForMainFrame()
+                            + " url=" + request.getUrl() + " code=" + error.getErrorCode()
+                            + " detail=" + error.getDescription());
+                }
                 if (request.isForMainFrame()) {
                     mainFrameFailed = true;
                     showLoadError(error.getDescription() == null
@@ -242,8 +372,24 @@ public class DmpWebActivity extends AppCompatActivity {
                 }
             }
         });
-        binding.dmpWebView.setDownloadListener((url, userAgent, contentDisposition, mimeType, length) ->
-                openExternal(Uri.parse(url)));
+        binding.dmpWebView.setDownloadListener((url, userAgent, contentDisposition, mimeType, length) -> {
+            Uri uri = Uri.parse(url == null ? "" : url);
+            // A Blob URL has no server-side address and is intentionally
+            // consumed by shouldOverrideUrlLoading above.  For a real DMP
+            // export, route the URL through the native bridge so the transfer
+            // appears in the task centre and lands in Download/DMP.
+            if ("blob".equalsIgnoreCase(uri.getScheme())) {
+                return;
+            }
+            DmpJavascriptBridge bridge = javascriptBridge;
+            String path = uri.getPath() == null ? "" : uri.getPath();
+            if (bridge != null && path.contains("/tools/backup/download")) {
+                String name = contentDisposition == null ? "" : contentDisposition;
+                bridge.downloadFile(url, name);
+                return;
+            }
+            openExternal(uri);
+        });
     }
 
     private void loadInitialPage() {
@@ -251,6 +397,41 @@ public class DmpWebActivity extends AppCompatActivity {
         binding.dmpWebErrorPanel.setVisibility(View.GONE);
         binding.dmpWebView.setVisibility(View.VISIBLE);
         binding.dmpWebView.loadUrl(initialUrl);
+    }
+
+    private static boolean isLocalDmpUrl(@NonNull Uri uri) {
+        String scheme = uri.getScheme();
+        if ("file".equalsIgnoreCase(scheme)) {
+            String path = uri.getPath();
+            return path != null && path.startsWith("/android_asset/dmp_web/");
+        }
+        return "https".equalsIgnoreCase(scheme)
+                && LOCAL_ASSET_HOST.equalsIgnoreCase(uri.getHost());
+    }
+
+    /** Maps an appassets URL prefix to a subdirectory under APK assets. */
+    private static final class PrefixedAssetPathHandler
+            implements WebViewAssetLoader.PathHandler {
+        private final WebViewAssetLoader.AssetsPathHandler delegate;
+        private final String prefix;
+
+        PrefixedAssetPathHandler(android.content.Context context, String prefix) {
+            this.delegate = new WebViewAssetLoader.AssetsPathHandler(context);
+            this.prefix = prefix == null ? "" : prefix;
+        }
+
+        @Override
+        public WebResourceResponse handle(String path) {
+            String relative = path == null ? "" : path;
+            while (relative.startsWith("/")) {
+                relative = relative.substring(1);
+            }
+            // Do not allow a malformed URL to escape the bundled asset tree.
+            if (relative.contains("..") || relative.indexOf('\\') >= 0) {
+                return null;
+            }
+            return delegate.handle(prefix + relative);
+        }
     }
 
     private void showLoadError(String detail) {
@@ -261,11 +442,42 @@ public class DmpWebActivity extends AppCompatActivity {
     }
 
     void openExternal(Uri uri) {
+        if (uri == null || !isHttpUrl(uri)) {
+            return;
+        }
         try {
             startActivity(new Intent(Intent.ACTION_VIEW, uri));
         } catch (ActivityNotFoundException exception) {
             Toast.makeText(this, R.string.dmp_no_external_app, Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private static boolean isHttpUrl(@Nullable Uri uri) {
+        if (uri == null) {
+            return false;
+        }
+        String scheme = uri.getScheme();
+        return "http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme);
+    }
+
+    /** Explain how to restore clipboard access when Android blocks the WebView/native write. */
+    void showClipboardPermissionHint() {
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            new androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("需要剪切板权限")
+                    .setMessage("系统当前禁止应用写入剪切板，请在系统设置中允许剪切板访问后再试。")
+                    .setNegativeButton("取消", null)
+                    .setPositiveButton("打开系统设置", (dialog, which) -> {
+                        try {
+                            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    Uri.parse("package:" + getPackageName()));
+                            startActivity(intent);
+                        } catch (RuntimeException exception) {
+                            Toast.makeText(this, "无法打开系统设置", Toast.LENGTH_SHORT).show();
+                        }
+                    }).show();
+        });
     }
 
     @Override
@@ -298,6 +510,30 @@ public class DmpWebActivity extends AppCompatActivity {
     }
 
     private void handleBack() {
+        // Room-preview mod/player cards are WebView overlays.  They must
+        // consume the first Android Back press before the shell changes the
+        // dashboard route; otherwise a card that is still open appears to
+        // jump straight back to the room overview.  The helper is provided
+        // by dmp-room-preview-cards.js and is deliberately best-effort so an
+        // older cached page still follows the normal native route handling.
+        if (binding != null && binding.dmpWebView != null) {
+            binding.dmpWebView.evaluateJavascript(
+                    "(function(){try{return !!(window.__dmpCloseRoomPreviewCard "
+                            + "&& window.__dmpCloseRoomPreviewCard())}catch(e){return false}})()",
+                    result -> {
+                        if (result != null && result.replace("\"", "")
+                                .trim().equalsIgnoreCase("true")) {
+                            return;
+                        }
+                        handleBackRoute();
+                    });
+            return;
+        }
+        handleBackRoute();
+    }
+
+    /** Route-level Back handling after WebView overlays had a chance to close. */
+    private void handleBackRoute() {
         if (binding.dmpWebErrorPanel.getVisibility() == View.VISIBLE) {
             finish();
         } else {
@@ -310,11 +546,15 @@ public class DmpWebActivity extends AppCompatActivity {
                 if (fromRoomManagement) {
                     // Total-room management already is the correct parent;
                     // do not open the room preview a second time.
-                    Log.d(TAG, "back dashboard -> native room management");
+                    if (BuildConfig.DEBUG) {
+                        Log.d(TAG, "back dashboard -> native room management");
+                    }
                     finish();
                     return;
                 }
-                Log.d(TAG, "back dashboard -> room overview");
+                if (BuildConfig.DEBUG) {
+                    Log.d(TAG, "back dashboard -> room overview");
+                }
                 navigateToRoute("/rooms");
                 return;
             }
@@ -346,8 +586,17 @@ public class DmpWebActivity extends AppCompatActivity {
     }
 
     private void navigateToRoute(String route) {
-        binding.dmpWebView.loadUrl("javascript:(function(){location.hash='"
-                + route + "';})()");
+        // The Android bridge keeps the last leaf route so an unauthorised
+        // `/login -> /rooms` bounce can be restored.  A native Back action is
+        // an explicit room-overview navigation, so mark it before changing
+        // the hash; otherwise the continuity guard immediately restores the
+        // control panel and Back appears to do nothing.
+        String safeRoute = route == null ? "/dashboard"
+                : route.replace("\\", "\\\\").replace("'", "\\'");
+        binding.dmpWebView.loadUrl("javascript:(function(){try{if('"
+                + safeRoute
+                + "'==='/rooms'){sessionStorage.setItem('dmp-android-explicit-rooms-at',String(Date.now()));sessionStorage.removeItem('dmp-android-last-leaf-route');sessionStorage.removeItem('dmp-android-last-leaf-at');}}catch(e){}location.hash='"
+                + safeRoute + "';})()");
     }
 
     /** Returns from a later tab (添加/配置、管理员/黑名单等) to its first tab. */
@@ -373,6 +622,7 @@ public class DmpWebActivity extends AppCompatActivity {
             pendingFileCallback = null;
         }
         if (binding != null) {
+            javascriptBridge = null;
             binding.dmpWebView.removeJavascriptInterface("AndroidDmp");
             binding.dmpWebView.stopLoading();
             binding.dmpWebView.setWebChromeClient(null);

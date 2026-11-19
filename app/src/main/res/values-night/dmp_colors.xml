@@ -16,6 +16,7 @@
     <color name="dmp_blue">#28B8FF</color>
     <color name="dmp_blue_surface">#294B78</color>
     <color name="dmp_warning">#FF9E80</color>
+    <color name="dmp_warning_surface">#4A2F28</color>
     <color name="dmp_input">#302C4E</color>
     <color name="dmp_input_stroke">#766F9C</color>
     <color name="dmp_track">#514C70</color>

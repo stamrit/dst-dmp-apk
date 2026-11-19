@@ -39,9 +39,10 @@
 
                 <TextView
                     android:id="@+id/dmp_server_remark"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
+                    android:ellipsize="end"
                     android:maxLines="1"
                     android:textColor="@color/dmp_text_secondary"
                     android:textSize="13sp" />
@@ -77,10 +78,11 @@
 
                 <TextView
                     android:id="@+id/dmp_server_address"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:background="@drawable/bg_dmp_address"
                     android:drawablePadding="8dp"
+                    android:ellipsize="end"
                     android:maxLines="1"
                     android:paddingStart="12dp"
                     android:paddingTop="8dp"

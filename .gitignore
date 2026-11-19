@@ -8,3 +8,31 @@ tools/gh/
 *.jks
 *.keystore
 keystore.properties
+
+# Local device captures and UI dumps.  These may contain server addresses,
+# room names, player names, or other private test-session data.
+/*.png
+/*.jpg
+/*.jpeg
+/*.webp
+/*.xml
+
+# APK inspection and locally generated release/build artifacts.
+apkinspect/
+releases/
+*.apk
+*.aab
+*.apks
+
+# Local diagnostics and editor/OS residue.
+captures/
+screenshots/
+temp/
+audit/
+*.log
+*.hprof
+*.dump
+*.trace
+*.bak
+*.orig
+*.swp

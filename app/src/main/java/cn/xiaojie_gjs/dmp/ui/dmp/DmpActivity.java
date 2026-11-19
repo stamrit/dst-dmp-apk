@@ -6,11 +6,14 @@ import android.animation.ValueAnimator;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.Paint;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.SpannableStringBuilder;
@@ -34,6 +37,7 @@ import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.GridLayout;
 import android.view.animation.LinearInterpolator;
 
 import androidx.annotation.NonNull;
@@ -57,11 +61,13 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import cn.xiaojie_gjs.dmp.R;
+import cn.xiaojie_gjs.dmp.BuildConfig;
 import cn.xiaojie_gjs.dmp.databinding.ActivityDmpBinding;
 import cn.xiaojie_gjs.dmp.databinding.DialogDmpServerBinding;
 
@@ -71,8 +77,12 @@ public class DmpActivity extends AppCompatActivity
 
     private static final String TAG = "DmpRoomSelection";
     private static final long REFRESH_INTERVAL_MS = 5000L;
+    private static final long DMP_VERSION_PROBE_INTERVAL_MS = 5 * 60 * 1000L;
     private static final String UI_PREFERENCES = "dmp_ui_preferences";
     private static final String PREF_NIGHT_MODE = "night_mode";
+    private static final String PREF_DEVELOPER_MODE = "developer_mode";
+    private static final String PREF_ANDROID_DOWNLOAD_UI = "android_download_ui";
+    private static final String PREF_ANDROID_MOD_CONFIG_UI = "android_mod_config_ui";
     private static final String PREF_DISMISSED_UPDATE_TASKS = "dismissed_update_tasks";
     private static final String PREF_DISMISSED_TASKS = "dismissed_tasks";
     /** Legacy (boolean-only) update rows can be removed locally while the
@@ -81,26 +91,39 @@ public class DmpActivity extends AppCompatActivity
     private static final String PREF_DISMISSED_LEGACY_UPDATE_SERVERS =
             "dismissed_legacy_update_servers";
     private static final String PREF_LOCAL_UPDATE_TASKS = "local_update_tasks";
+    private static final String PREF_ACKNOWLEDGED_TASK_ERRORS =
+            "acknowledged_task_errors";
     private static final String STATE_ROOM_MODE = "room_mode";
     private static final String STATE_ROOM_SERVER_IDS = "room_server_ids";
     private static final String STATE_ROOM_IDS = "room_ids";
     private static final String STATE_ROOM_NAMES = "room_names";
     private static final String STATE_ROOM_GAME_MODES = "room_game_modes";
     private static final String STATE_ROOM_ONLINE = "room_online";
+    private static final String STATE_ROOM_RUNNING = "room_running";
     private static final String STATE_ROOM_WORLD_COUNTS = "room_world_counts";
     private static final String STATE_ROOM_MAX_PLAYERS = "room_max_players";
     private static final String STATE_ROOM_ONLINE_PLAYERS = "room_online_players";
     private static final String STATE_ROOM_PLAYER_NAMES = "room_player_names";
+    private static final String STATE_ROOM_MASTER_WORLD_IDS = "room_master_world_ids";
 
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final DmpApiClient apiClient = new DmpApiClient();
+    private DmpApiClient apiClient;
     private final Runnable periodicRefresh = new Runnable() {
         @Override
         public void run() {
-            if (!roomMode) {
+            /* Keep both top-level views live.  The launcher refreshes server
+             * metrics; the aggregate room overview must also refresh its
+             * online/running state and player snapshot, otherwise the count
+             * and player list remain frozen until a manual pull gesture.  A
+             * non-rendering room refresh updates the adapter in place and
+             * avoids clearing the visible list or showing a loading spinner
+             * every five seconds. */
+            if (roomMode) {
+                refreshRooms(false);
+            } else {
                 refreshAll();
-                handler.postDelayed(this, REFRESH_INTERVAL_MS);
             }
+            handler.postDelayed(this, REFRESH_INTERVAL_MS);
         }
     };
 
@@ -112,10 +135,26 @@ public class DmpActivity extends AppCompatActivity
     private boolean destroyed;
     private boolean roomMode;
     private boolean nightMode;
+    /** Advanced Android presentation switches are hidden unless enabled. */
+    private boolean developerMode;
+    /** Android presentation layers are enabled by default for the mobile app. */
+    private boolean androidDownloadUi;
+    private boolean androidModConfigUi;
+    @Nullable
+    private android.widget.Switch settingsNightSwitch;
     private int roomLoadGeneration;
+    /** True once the background room overview snapshot has completed. */
+    private boolean roomSnapshotReady;
+    /** Prevent duplicate background loads while the overview is prefetched. */
+    private boolean roomSnapshotLoading;
     private int spanCount;
     private int latestDmpVersion;
+    /** Highest installed DMP Web release discovered among configured hosts. */
+    private String latestInstalledDmpVersion = "";
     private int taskLoadGeneration;
+    /** Monotonic request id for aggregate task refreshes.  A slow response
+     * from an older poll must not overwrite the newer poll's snapshot. */
+    private int taskRefreshRequestId;
     private int downloadProgressGeneration;
     private long taskDialogInteractionLockedUntil;
     private List<DmpRoom> roomSnapshot = new ArrayList<>();
@@ -124,11 +163,25 @@ public class DmpActivity extends AppCompatActivity
     @Nullable
     private AlertDialog updateDialog;
     @Nullable
+    private AlertDialog settingsDialog;
+    @Nullable
     private LinearLayout taskDialogContent;
+    /** Current tab in the aggregate task centre: 0 = tasks, 1 = notices. */
+    private int taskDialogTab;
+    @Nullable
+    private TextView taskDialogTasksTab;
+    @Nullable
+    private TextView taskDialogNotificationsTab;
+    /** Acknowledged aggregate notifications stay quiet until a new refresh
+     * reports a different update.  This mirrors the WebView notification
+     * centre without coupling the native card to its DOM. */
+    private final Set<String> acknowledgedPlatformNotifications = new HashSet<>();
     @Nullable
     private ImageView taskDeleteSpinner;
+    /** Short-click control for clearing completed rows; long-press opens the
+     * explicit all-task deletion confirmation. */
     @Nullable
-    private ImageButton taskClearFinished;
+    private ImageButton taskClearCompletedButton;
     @Nullable
     private ObjectAnimator taskDeleteSpinnerAnimator;
     private int taskDeleteRequestsInFlight;
@@ -141,27 +194,57 @@ public class DmpActivity extends AppCompatActivity
     private List<DmpTask> visibleTaskSnapshot = new ArrayList<>();
     /** Latest background task snapshot, available before the task dialog opens. */
     private volatile List<DmpTask> prefetchedTaskSnapshot = new ArrayList<>();
+    /**
+     * Stable aggregate ordering.  Server status polls update progress and
+     * timestamps independently; sorting directly by those values made rows
+     * swap places every poll.  Keep the first-seen semantic task order and
+     * append genuinely new tasks in a deterministic order instead.
+     */
+    private final List<String> taskStableOrder = new ArrayList<>();
     /** Rows whose latest action is awaiting a server acknowledgement. */
     private final Set<String> pendingTaskActions = new HashSet<>();
+    /** Failure tokens acknowledged from the aggregate task entry. */
+    private final Set<String> acknowledgedTaskErrors = new HashSet<>();
+    /** A retry request that failed before a new server task was created. */
+    private final Set<String> retryFailureTasks = new HashSet<>();
     @Nullable
     private String taskFeedback;
     /**
      * Rendered feedback view kept separate from the asynchronously refreshed
      * task rows.  A server request can take several seconds; mounting this
-     * view immediately prevents the five-second acknowledgement from being
+     * view immediately prevents the three-second acknowledgement from being
      * lost while the next task snapshot is in flight.
      */
     @Nullable
     private TextView taskFeedbackView;
     private final Runnable clearTaskFeedback = () -> {
+        // Keep the acknowledgement visible for the requested three seconds,
+        // then fade it out instead of removing it abruptly.  Clear the
+        // backing value before starting the animation so a new action can
+        // safely replace it while this one is fading.
         taskFeedback = null;
-        if (taskFeedbackView != null) {
-            ViewParent parent = taskFeedbackView.getParent();
-            if (parent instanceof ViewGroup) {
-                ((ViewGroup) parent).removeView(taskFeedbackView);
-            }
-            taskFeedbackView = null;
+        final TextView fadingView = taskFeedbackView;
+        if (fadingView == null) {
+            return;
         }
+        fadingView.animate().cancel();
+        fadingView.animate()
+                .alpha(0f)
+                .setDuration(450L)
+                .withEndAction(() -> {
+                    // A new acknowledgement may have reused this TextView
+                    // while the old one was fading.  Never remove that newer
+                    // message or leave its alpha at zero.
+                    if (taskFeedback != null || taskFeedbackView != fadingView) {
+                        return;
+                    }
+                    // Keep the fixed-height slot at the bottom of the task
+                    // card. Removing it made the whole dialog jump upward
+                    // whenever the three-second message expired.
+                    fadingView.setText("");
+                    fadingView.setAlpha(0f);
+                })
+                .start();
     };
     /** Immediate acknowledgement for legacy dashboard updates without /tasks. */
     private final Map<String, DmpTask> localUpdateTasks =
@@ -188,12 +271,30 @@ public class DmpActivity extends AppCompatActivity
                 PREF_DISMISSED_TASKS, Collections.emptySet()));
         dismissedLegacyUpdateServers.addAll(uiPreferences.getStringSet(
                 PREF_DISMISSED_LEGACY_UPDATE_SERVERS, Collections.emptySet()));
+        acknowledgedTaskErrors.addAll(uiPreferences.getStringSet(
+                PREF_ACKNOWLEDGED_TASK_ERRORS, Collections.emptySet()));
         nightMode = uiPreferences.getBoolean(PREF_NIGHT_MODE, true);
+        // Developer-only presentation switches are currently kept off for the
+        // production APK.  Clear a value left by an older build as well, so a
+        // previously enabled developer mode cannot reappear or alter the
+        // bootstrap flags after an upgrade.
+        developerMode = false;
+        uiPreferences.edit().putBoolean(PREF_DEVELOPER_MODE, false).apply();
+        // The developer switch is permanently locked off in this build; the
+        // mobile download/configuration presentation therefore remains the
+        // supported default and cannot be disabled by a stale old preference.
+        androidDownloadUi = true;
+        androidModConfigUi = true;
+        uiPreferences.edit()
+                .putBoolean(PREF_ANDROID_DOWNLOAD_UI, true)
+                .putBoolean(PREF_ANDROID_MOD_CONFIG_UI, true)
+                .apply();
         getDelegate().setLocalNightMode(nightMode
                 ? AppCompatDelegate.MODE_NIGHT_YES
                 : AppCompatDelegate.MODE_NIGHT_NO);
         getWindow().setBackgroundDrawable(new ColorDrawable(themeBackground(nightMode)));
         super.onCreate(savedInstanceState);
+        apiClient = new DmpApiClient(getApplicationContext());
         binding = ActivityDmpBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
 
@@ -206,8 +307,10 @@ public class DmpActivity extends AppCompatActivity
         spanCount = getResources().getConfiguration().screenWidthDp >= 900 ? 2 : 1;
 
         binding.dmpRefreshLayout.setOnRefreshListener(() -> {
-            Log.d(TAG, "pull refresh requested roomMode=" + roomMode
-                    + " selections=" + selectionSummary());
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, "pull refresh requested roomMode=" + roomMode
+                        + " selections=" + selectionSummary());
+            }
             if (roomMode) {
                 refreshRooms();
             } else {
@@ -218,7 +321,9 @@ public class DmpActivity extends AppCompatActivity
                 binding.dmpRoomLoading.setVisibility(View.VISIBLE);
                 refreshAll(() -> {
                     restorePersistedRoomSelections();
-                    Log.d(TAG, "pull refresh completed selections=" + selectionSummary());
+                    if (BuildConfig.DEBUG) {
+                        Log.d(TAG, "pull refresh completed selections=" + selectionSummary());
+                    }
                     binding.dmpRoomLoading.setVisibility(View.GONE);
                     binding.dmpRefreshLayout.setRefreshing(false);
                 });
@@ -228,12 +333,23 @@ public class DmpActivity extends AppCompatActivity
             // Both directions switch the two top-level management views.  A
             // deliberate 72dp gesture is required by DmpPullRefreshLayout,
             // so this does not interfere with card taps or vertical scrolling.
-            Log.d(TAG, "top-level swipe direction=" + direction
-                    + " roomMode=" + roomMode);
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, "top-level swipe direction=" + direction
+                        + " roomMode=" + roomMode);
+            }
             switchRoomMode(!roomMode);
         });
         binding.dmpRoomMode.setOnClickListener(v -> switchRoomMode(!roomMode));
-        binding.dmpDownloadTasks.setOnClickListener(v -> showTaskDialog());
+        binding.dmpSettings.setOnClickListener(v -> showSettingsDialog());
+        binding.dmpImportBlacklist.setOnClickListener(v -> importCommunityBlacklist());
+        binding.dmpDownloadTasks.setOnClickListener(v -> {
+            // The aggregate entry acknowledges every currently visible
+            // failure.  The task state itself remains failed, so a later
+            // retry/new failure can turn the entry red again.
+            acknowledgeTaskErrors(prefetchedTaskSnapshot);
+            updateDownloadButtonState(prefetchedTaskSnapshot);
+            showTaskDialog();
+        });
         binding.dmpUpdateServers.setOnClickListener(v -> showUpdateDialog());
         binding.dmpThemeToggle.setOnClickListener(v -> toggleTheme(uiPreferences));
         updateThemeButton();
@@ -248,15 +364,20 @@ public class DmpActivity extends AppCompatActivity
                 && savedInstanceState.getBoolean(STATE_ROOM_MODE, false);
         boolean restoredSnapshot = restoredRoomMode && restoreRoomSnapshot(savedInstanceState);
         switchRoomMode(restoredRoomMode, !restoredSnapshot);
+        // Keep the launcher on the platform-management view, but warm the
+        // aggregate room overview in the background.  Entering that view can
+        // then render the already fetched snapshot instead of issuing a second
+        // request.  Pull-to-refresh remains the explicit refresh path.
+        if (!restoredRoomMode && !restoredSnapshot) {
+            preloadRoomsInBackground();
+        }
     }
 
     @Override
     protected void onStart() {
         super.onStart();
         handler.removeCallbacks(periodicRefresh);
-        if (!roomMode) {
-            handler.post(periodicRefresh);
-        }
+        handler.post(periodicRefresh);
     }
 
     @Override
@@ -267,6 +388,9 @@ public class DmpActivity extends AppCompatActivity
             spanCount = updatedSpanCount;
             switchRoomMode(roomMode, false);
         }
+        // The subtitle may gain or lose the installed-DMP suffix after a
+        // rotation even when the launcher grid keeps the same span count.
+        updateLauncherSubtitle();
     }
 
     @Override
@@ -290,9 +414,11 @@ public class DmpActivity extends AppCompatActivity
     @Override
     public void onEnter(DmpServer server) {
         restorePersistedRoomSelection(server);
-        Log.d(TAG, "platform entry server=" + server.id
-                + " selectedRoom=" + server.selectedRoomId
-                + " name=" + server.selectedRoomName);
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "platform entry server=" + server.id
+                    + " selectedRoom=" + server.selectedRoomId
+                    + " name=" + server.selectedRoomName);
+        }
         if (server.selectedRoomId <= 0) {
             openPlatformDashboard(server);
             return;
@@ -324,12 +450,16 @@ public class DmpActivity extends AppCompatActivity
                     }
                     if (validRoom == null) {
                         clearPersistedRoomSelection(server);
-                        Log.d(TAG, "selection invalidated server=" + server.id
-                                + " room=" + selectedId + " (not in current room list)");
+                        if (BuildConfig.DEBUG) {
+                            Log.d(TAG, "selection invalidated server=" + server.id
+                                    + " room=" + selectedId + " (not in current room list)");
+                        }
                     } else if (!validRoom.gameName.equals(server.selectedRoomName)) {
                         persistRoomSelection(server, validRoom.id, validRoom.gameName);
-                        Log.d(TAG, "selection name refreshed server=" + server.id
-                                + " room=" + validRoom.id + " name=" + validRoom.gameName);
+                        if (BuildConfig.DEBUG) {
+                            Log.d(TAG, "selection name refreshed server=" + server.id
+                                    + " room=" + validRoom.id + " name=" + validRoom.gameName);
+                        }
                     }
                     openPlatformDashboard(server);
                 });
@@ -337,8 +467,10 @@ public class DmpActivity extends AppCompatActivity
 
             @Override
             public void onError(String message) {
-                Log.d(TAG, "selection validation skipped server=" + server.id
-                        + " reason=" + (message == null ? "unknown" : message));
+                if (BuildConfig.DEBUG) {
+                    Log.d(TAG, "selection validation skipped server=" + server.id
+                            + " reason=" + (message == null ? "unknown" : message));
+                }
                 runOnUiThread(() -> {
                     if (!destroyed) {
                         openPlatformDashboard(server);
@@ -354,6 +486,11 @@ public class DmpActivity extends AppCompatActivity
         // return directly to that native list from the control panel rather
         // than opening the room preview a second time.
         openDashboard(room.server, room.id, room.gameName, true);
+    }
+
+    @Override
+    public void onRoomActions(DmpRoom room) {
+        showRoomActionsDialog(room);
     }
 
     @Override
@@ -399,6 +536,8 @@ public class DmpActivity extends AppCompatActivity
         intent.putExtra(DmpWebActivity.EXTRA_SELECTED_ROOM_NAME, selectedRoomName);
         intent.putExtra(DmpWebActivity.EXTRA_FROM_ROOM_MANAGEMENT, fromRoomManagement);
         intent.putExtra(DmpWebActivity.EXTRA_NIGHT_MODE, nightMode);
+        intent.putExtra(DmpWebActivity.EXTRA_ANDROID_DOWNLOAD_UI, androidDownloadUi);
+        intent.putExtra(DmpWebActivity.EXTRA_ANDROID_MOD_CONFIG_UI, androidModConfigUi);
         startActivity(intent);
     }
 
@@ -418,15 +557,19 @@ public class DmpActivity extends AppCompatActivity
                 server.selectedRoomId = Math.max(0, candidate.selectedRoomId);
                 server.selectedRoomName = candidate.selectedRoomName == null
                         ? "" : candidate.selectedRoomName;
-                Log.d(TAG, "restore server=" + server.id
-                        + " old=" + previousId + "/" + previousName
-                        + " new=" + server.selectedRoomId + "/" + server.selectedRoomName);
+                if (BuildConfig.DEBUG) {
+                    Log.d(TAG, "restore server=" + server.id
+                            + " old=" + previousId + "/" + previousName
+                            + " new=" + server.selectedRoomId + "/" + server.selectedRoomName);
+                }
                 return;
             }
         }
         server.selectedRoomId = 0;
         server.selectedRoomName = "";
-        Log.d(TAG, "restore server=" + server.id + " no persisted selection");
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "restore server=" + server.id + " no persisted selection");
+        }
     }
 
     /** Reload every platform's durable room choice without touching metrics. */
@@ -444,8 +587,10 @@ public class DmpActivity extends AppCompatActivity
                 }
             }
         }
-        Log.d(TAG, "restore all selections matched=" + restored
-                + " total=" + servers.size());
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "restore all selections matched=" + restored
+                    + " total=" + servers.size());
+        }
     }
 
     /** Persist a validated room choice while keeping the current object in sync. */
@@ -492,6 +637,9 @@ public class DmpActivity extends AppCompatActivity
 
     @Override
     public void onRefresh(DmpServer server) {
+        // A deliberate per-server refresh is allowed to re-check the static
+        // Web bundle immediately; the periodic five-second monitor is not.
+        server.dmpInstalledVersionCheckedAt = 0L;
         refreshServer(server);
     }
 
@@ -524,7 +672,15 @@ public class DmpActivity extends AppCompatActivity
             // Invalidate an in-flight room aggregation before changing the
             // adapter.  Otherwise its completion callback can be discarded
             // while leaving the pull container stuck in its refreshing state.
-            roomLoadGeneration++;
+            // A startup preload is intentionally kept alive when entering the
+            // overview; cancelling it here would force a second request.
+            // Keep an in-flight startup/refresh request alive across a
+            // launcher <-> room-overview switch.  Cancelling its generation
+            // here would leave roomSnapshotLoading stuck and make the next
+            // entry wait forever on a request that can no longer commit.
+            if (!roomSnapshotLoading) {
+                roomLoadGeneration++;
+            }
             binding.dmpRefreshLayout.setRefreshing(false);
         }
         roomMode = showRooms;
@@ -543,6 +699,7 @@ public class DmpActivity extends AppCompatActivity
         }
         binding.dmpDownloadTasks.setVisibility(showRooms ? View.GONE : View.VISIBLE);
         binding.dmpUpdateServers.setVisibility(showRooms ? View.GONE : View.VISIBLE);
+        binding.dmpImportBlacklist.setVisibility(showRooms ? View.VISIBLE : View.GONE);
         if (showRooms) {
             binding.dmpDownloadProgress.setVisibility(View.GONE);
         } else {
@@ -561,12 +718,24 @@ public class DmpActivity extends AppCompatActivity
             });
             binding.dmpServerList.setLayoutManager(roomLayoutManager);
             binding.dmpServerList.setAdapter(roomAdapter);
-            if (refreshRoomSnapshot) {
-                refreshRooms();
+            if (refreshRoomSnapshot && !roomSnapshotReady) {
+                if (roomSnapshotLoading) {
+                    binding.dmpRoomLoading.setVisibility(View.VISIBLE);
+                } else {
+                    refreshRooms();
+                }
             } else {
                 roomAdapter.setRooms(roomSnapshot);
                 binding.dmpRoomEmpty.setVisibility(
                         roomSnapshot.isEmpty() ? View.VISIBLE : View.GONE);
+            }
+            // switchRoomMode() removes the shared timer before changing the
+            // adapter. Re-arm it here as well as in onStart(), otherwise a
+            // user who enters the aggregate overview while the activity is
+            // already foregrounded would never receive the five-second room
+            // and player refreshes.
+            if (hasWindowFocus()) {
+                handler.post(periodicRefresh);
             }
         } else {
             GridLayoutManager layoutManager = new GridLayoutManager(this, spanCount);
@@ -586,16 +755,107 @@ public class DmpActivity extends AppCompatActivity
 
     /** Aggregates one snapshot only; deliberately has no delayed or periodic callback. */
     private void refreshRooms() {
+        refreshRooms(true);
+    }
+
+    /**
+     * Warm the room overview without changing the current launcher page.  The
+     * first switch to room mode consumes this snapshot; only pull-to-refresh
+     * calls the rendered variant again.
+     */
+    private void preloadRoomsInBackground() {
+        if (roomSnapshotReady || roomSnapshotLoading || servers.isEmpty()) {
+            return;
+        }
+        refreshRooms(false);
+    }
+
+    /**
+     * Import the public DST Block list through each room's DMP backend.
+     *
+     * The public list is intentionally never fetched by the Android client:
+     * LinuxDMP owns that external request and performs its normal de-duplication
+     * when it receives the same action payload as the desktop client.
+     */
+    private void importCommunityBlacklist() {
+        LinkedHashMap<String, DmpRoom> unique = new LinkedHashMap<>();
+        for (DmpRoom room : roomSnapshot) {
+            if (room == null || room.server == null || room.id <= 0) {
+                continue;
+            }
+            String serverId = room.server.id == null || room.server.id.trim().isEmpty()
+                    ? room.server.host : room.server.id;
+            unique.put(serverId + ":" + room.id, room);
+        }
+        if (unique.isEmpty()) {
+            Toast.makeText(this, "当前没有可处理的房间", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        binding.dmpImportBlacklist.setEnabled(false);
+        AtomicInteger remaining = new AtomicInteger(unique.size());
+        AtomicInteger success = new AtomicInteger();
+        AtomicInteger failures = new AtomicInteger();
+        List<String> errors = Collections.synchronizedList(new ArrayList<>());
+        for (DmpRoom room : unique.values()) {
+            apiClient.importCommunityBlocklist(room.server, room.id,
+                    new DmpApiClient.BlocklistImportCallback() {
+                        private void complete() {
+                            if (remaining.decrementAndGet() != 0) {
+                                return;
+                            }
+                            runOnUiThread(() -> {
+                                if (destroyed || binding == null) {
+                                    return;
+                                }
+                                binding.dmpImportBlacklist.setEnabled(true);
+                                int failed = failures.get();
+                                String message = "社区黑名单导入完成：成功 " + success.get()
+                                        + " 个房间";
+                                if (failed > 0) {
+                                    message += "，失败 " + failed + " 个房间";
+                                    if (!errors.isEmpty() && errors.get(0) != null
+                                            && !errors.get(0).trim().isEmpty()) {
+                                        message += "（" + errors.get(0) + "）";
+                                    }
+                                }
+                                Toast.makeText(DmpActivity.this, message,
+                                        Toast.LENGTH_LONG).show();
+                            });
+                        }
+
+                        @Override
+                        public void onSuccess() {
+                            success.incrementAndGet();
+                            complete();
+                        }
+
+                        @Override
+                        public void onError(String message) {
+                            failures.incrementAndGet();
+                            errors.add(message == null ? "导入失败" : message);
+                            complete();
+                        }
+                    });
+        }
+    }
+
+    private void refreshRooms(boolean render) {
+        if (roomSnapshotLoading && !render) {
+            return;
+        }
         final int generation = ++roomLoadGeneration;
+        roomSnapshotLoading = true;
         // Room mode still needs the platform metrics used by the create-room
         // chooser (online light, counts, CPU and memory).  This is a one-shot
         // refresh; the normal platform timer remains disabled in room mode.
-        refreshAll();
-        roomAdapter.setRooms(new ArrayList<>());
-        binding.dmpRoomEmpty.setVisibility(View.GONE);
-        binding.dmpRoomLoading.setVisibility(View.VISIBLE);
+        if (render) {
+            refreshAll();
+            roomAdapter.setRooms(new ArrayList<>());
+            binding.dmpRoomEmpty.setVisibility(View.GONE);
+            binding.dmpRoomLoading.setVisibility(View.VISIBLE);
+        }
         if (servers.isEmpty()) {
-            finishRoomRefresh(generation, new ArrayList<>(), 0);
+            finishRoomRefresh(generation, new ArrayList<>(), 0, render);
             return;
         }
 
@@ -609,13 +869,13 @@ public class DmpActivity extends AppCompatActivity
                     synchronized (aggregate) {
                         aggregate.addAll(rooms);
                     }
-                    completeRoomRequest(generation, aggregate, remaining, failures);
+                    completeRoomRequest(generation, aggregate, remaining, failures, render);
                 }
 
                 @Override
                 public void onError(String message) {
                     failures.incrementAndGet();
-                    completeRoomRequest(generation, aggregate, remaining, failures);
+                    completeRoomRequest(generation, aggregate, remaining, failures, render);
                 }
             });
         }
@@ -625,7 +885,8 @@ public class DmpActivity extends AppCompatActivity
             int generation,
             List<DmpRoom> aggregate,
             AtomicInteger remaining,
-            AtomicInteger failures) {
+            AtomicInteger failures,
+            boolean render) {
         if (remaining.decrementAndGet() != 0) {
             return;
         }
@@ -633,28 +894,54 @@ public class DmpActivity extends AppCompatActivity
         synchronized (aggregate) {
             snapshot = new ArrayList<>(aggregate);
         }
+        // A few DMP deployments have returned the same room row more than
+        // once during a concurrent room/status refresh.  The room identity is
+        // server-scoped, so collapse only exact (server, room-id) duplicates;
+        // rooms with different IDs or names remain visible and are not
+        // guessed to be duplicates.
+        LinkedHashMap<String, DmpRoom> uniqueRooms = new LinkedHashMap<>();
+        for (DmpRoom room : snapshot) {
+            if (room == null || room.server == null || room.id <= 0) {
+                continue;
+            }
+            String serverKey = room.server.id == null || room.server.id.trim().isEmpty()
+                    ? room.server.baseUrl() : room.server.id.trim();
+            String roomKey = serverKey + "|" + room.id;
+            uniqueRooms.put(roomKey, room);
+        }
+        snapshot = new ArrayList<>(uniqueRooms.values());
         snapshot.sort(Comparator
-                .comparing((DmpRoom room) -> !room.online)
+                // Running + reachable rooms are the useful first group;
+                // reachable but closed rooms follow; unreachable rooms are
+                // kept at the bottom so they never interrupt active servers.
+                .comparingInt((DmpRoom room) -> room.running && room.online ? 0
+                        : !room.running && room.online ? 1
+                        : room.running ? 2 : 3)
                 .thenComparing(room -> room.gameName, String.CASE_INSENSITIVE_ORDER)
                 .thenComparing(room -> room.server.remark.isEmpty()
                         ? room.server.host
                         : room.server.remark, String.CASE_INSENSITIVE_ORDER));
-        finishRoomRefresh(generation, snapshot, failures.get());
+        finishRoomRefresh(generation, snapshot, failures.get(), render);
     }
 
-    private void finishRoomRefresh(int generation, List<DmpRoom> rooms, int failures) {
+    private void finishRoomRefresh(
+            int generation, List<DmpRoom> rooms, int failures, boolean render) {
         runOnUiThread(() -> {
-            if (destroyed || !roomMode || generation != roomLoadGeneration) {
+            if (destroyed || generation != roomLoadGeneration) {
                 return;
             }
-            binding.dmpRoomLoading.setVisibility(View.GONE);
-            binding.dmpRefreshLayout.setRefreshing(false);
+            roomSnapshotLoading = false;
             roomSnapshot = new ArrayList<>(rooms);
-            roomAdapter.setRooms(rooms);
-            binding.dmpRoomEmpty.setVisibility(rooms.isEmpty() ? View.VISIBLE : View.GONE);
-            if (failures > 0) {
-                Toast.makeText(this, getString(R.string.dmp_room_partial, failures),
-                        Toast.LENGTH_SHORT).show();
+            roomSnapshotReady = true;
+            if (roomMode) {
+                binding.dmpRoomLoading.setVisibility(View.GONE);
+                binding.dmpRefreshLayout.setRefreshing(false);
+                roomAdapter.setRooms(rooms);
+                binding.dmpRoomEmpty.setVisibility(rooms.isEmpty() ? View.VISIBLE : View.GONE);
+                if (render && failures > 0) {
+                    Toast.makeText(this, getString(R.string.dmp_room_partial, failures),
+                            Toast.LENGTH_SHORT).show();
+                }
             }
         });
     }
@@ -666,9 +953,11 @@ public class DmpActivity extends AppCompatActivity
         String[] names = new String[size];
         String[] modes = new String[size];
         boolean[] online = new boolean[size];
+        boolean[] running = new boolean[size];
         int[] worldCounts = new int[size];
         int[] maxPlayers = new int[size];
         int[] onlinePlayers = new int[size];
+        int[] masterWorldIds = new int[size];
         String[] playerNames = new String[size];
         for (int index = 0; index < size; index++) {
             DmpRoom room = roomSnapshot.get(index);
@@ -677,9 +966,11 @@ public class DmpActivity extends AppCompatActivity
             names[index] = room.gameName;
             modes[index] = room.gameMode;
             online[index] = room.online;
+            running[index] = room.running;
             worldCounts[index] = room.worldCount;
             maxPlayers[index] = room.maxPlayers;
             onlinePlayers[index] = room.onlinePlayers;
+            masterWorldIds[index] = room.masterWorldId;
             playerNames[index] = room.playerNames;
         }
         outState.putStringArray(STATE_ROOM_SERVER_IDS, serverIds);
@@ -687,9 +978,11 @@ public class DmpActivity extends AppCompatActivity
         outState.putStringArray(STATE_ROOM_NAMES, names);
         outState.putStringArray(STATE_ROOM_GAME_MODES, modes);
         outState.putBooleanArray(STATE_ROOM_ONLINE, online);
+        outState.putBooleanArray(STATE_ROOM_RUNNING, running);
         outState.putIntArray(STATE_ROOM_WORLD_COUNTS, worldCounts);
         outState.putIntArray(STATE_ROOM_MAX_PLAYERS, maxPlayers);
         outState.putIntArray(STATE_ROOM_ONLINE_PLAYERS, onlinePlayers);
+        outState.putIntArray(STATE_ROOM_MASTER_WORLD_IDS, masterWorldIds);
         outState.putStringArray(STATE_ROOM_PLAYER_NAMES, playerNames);
     }
 
@@ -702,18 +995,20 @@ public class DmpActivity extends AppCompatActivity
         String[] names = state.getStringArray(STATE_ROOM_NAMES);
         String[] modes = state.getStringArray(STATE_ROOM_GAME_MODES);
         boolean[] online = state.getBooleanArray(STATE_ROOM_ONLINE);
+        boolean[] running = state.getBooleanArray(STATE_ROOM_RUNNING);
         int[] worldCounts = state.getIntArray(STATE_ROOM_WORLD_COUNTS);
         int[] maxPlayers = state.getIntArray(STATE_ROOM_MAX_PLAYERS);
         int[] onlinePlayers = state.getIntArray(STATE_ROOM_ONLINE_PLAYERS);
+        int[] masterWorldIds = state.getIntArray(STATE_ROOM_MASTER_WORLD_IDS);
         String[] playerNames = state.getStringArray(STATE_ROOM_PLAYER_NAMES);
         if (serverIds == null || roomIds == null || names == null || modes == null
-                || online == null || worldCounts == null || maxPlayers == null
+                || online == null || running == null || worldCounts == null || maxPlayers == null
                 || onlinePlayers == null || playerNames == null) {
             return false;
         }
         int size = serverIds.length;
         if (roomIds.length != size || names.length != size || modes.length != size
-                || online.length != size || worldCounts.length != size
+                || online.length != size || running.length != size || worldCounts.length != size
                 || maxPlayers.length != size || onlinePlayers.length != size
                 || playerNames.length != size) {
             return false;
@@ -723,8 +1018,10 @@ public class DmpActivity extends AppCompatActivity
             DmpServer server = findServer(serverIds[index]);
             if (server != null) {
                 restored.add(new DmpRoom(server, roomIds[index], names[index], modes[index],
-                        online[index], worldCounts[index], maxPlayers[index],
-                        onlinePlayers[index], playerNames[index]));
+                        online[index], running[index], worldCounts[index], maxPlayers[index],
+                        onlinePlayers[index], playerNames[index],
+                        masterWorldIds != null && masterWorldIds.length == size
+                                ? masterWorldIds[index] : 0));
             }
         }
         roomSnapshot = restored;
@@ -781,6 +1078,276 @@ public class DmpActivity extends AppCompatActivity
         binding.dmpThemeToggle.setContentDescription(getString(nightMode
                 ? R.string.dmp_theme_day
                 : R.string.dmp_theme_night));
+        if (settingsNightSwitch != null && settingsNightSwitch.isChecked() != nightMode) {
+            settingsNightSwitch.setOnCheckedChangeListener(null);
+            settingsNightSwitch.setChecked(nightMode);
+            settingsNightSwitch.setOnCheckedChangeListener(
+                    (button, checked) -> {
+                        if (checked != nightMode) {
+                            toggleTheme(uiPreferences);
+                        }
+                    });
+        }
+    }
+
+    /** Native settings card for app-wide mobile presentation preferences. */
+    /** Native quick controls for one room in the aggregate room overview. */
+    private void showRoomActionsDialog(@Nullable DmpRoom room) {
+        if (room == null || room.server == null || room.id <= 0) {
+            Toast.makeText(this, "房间无效", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dpToPx(18), dpToPx(8), dpToPx(18), dpToPx(12));
+
+        TextView hint = new TextView(this);
+        hint.setText(room.gameName);
+        hint.setTextColor(getColor(R.color.dmp_text_secondary));
+        hint.setTextSize(14f);
+        hint.setSingleLine(true);
+        hint.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        content.addView(hint, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        GridLayout grid = new GridLayout(this);
+        int columns = getResources().getConfiguration().screenWidthDp >= 600 ? 3 : 2;
+        grid.setColumnCount(columns);
+        grid.setRowCount((int) Math.ceil(6d / columns));
+        grid.setUseDefaultMargins(false);
+        LinearLayout.LayoutParams gridParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        gridParams.topMargin = dpToPx(12);
+        content.addView(grid, gridParams);
+
+        TextView feedback = new TextView(this);
+        feedback.setText("");
+        feedback.setTextColor(getColor(R.color.dmp_text_secondary));
+        feedback.setTextSize(13f);
+        feedback.setGravity(Gravity.CENTER_VERTICAL);
+        feedback.setMinHeight(dpToPx(42));
+        feedback.setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6));
+        content.addView(feedback, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(48)));
+
+        final String[] labels = {"启动游戏", "关闭游戏", "快捷备份", "快捷保存", "启用伪停", "关闭伪停"};
+        final String[] actions = {"startup", "shutdown", "backup", "save", "pause", "resume"};
+        for (int index = 0; index < labels.length; index++) {
+            com.google.android.material.button.MaterialButton button =
+                    new com.google.android.material.button.MaterialButton(this);
+            button.setText(labels[index]);
+            button.setTextSize(13f);
+            button.setAllCaps(false);
+            button.setMinHeight(dpToPx(42));
+            button.setPadding(dpToPx(4), 0, dpToPx(4), 0);
+            GridLayout.Spec rowSpec = GridLayout.spec(index / columns);
+            GridLayout.Spec columnSpec = GridLayout.spec(index % columns, 1f);
+            GridLayout.LayoutParams buttonParams = new GridLayout.LayoutParams(rowSpec, columnSpec);
+            buttonParams.width = 0;
+            buttonParams.height = dpToPx(46);
+            int horizontal = dpToPx(4);
+            buttonParams.setMargins(horizontal, dpToPx(3), horizontal, dpToPx(3));
+            grid.addView(button, buttonParams);
+            final String action = actions[index];
+            button.setOnClickListener(v -> executeRoomAction(room, action, button, feedback));
+        }
+
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+                .setTitle("操作")
+                .setView(content)
+                .setNegativeButton(R.string.dmp_cancel, null)
+                .create();
+        dialog.setCanceledOnTouchOutside(true);
+        dialog.setOnShowListener(ignored -> applyLargeDialogCorners(dialog));
+        dialog.show();
+    }
+
+    private void executeRoomAction(
+            DmpRoom room,
+            String action,
+            com.google.android.material.button.MaterialButton button,
+            TextView feedback) {
+        if (apiClient == null || button == null || feedback == null) return;
+        button.setEnabled(false);
+        feedback.setText("正在向平台发送" + roomActionLabel(action) + "任务……");
+        feedback.setTextColor(getColor(R.color.dmp_text_secondary));
+        apiClient.executeRoomAction(room.server, room.id, room.masterWorldId, action,
+                new DmpApiClient.RoomActionCallback() {
+                    private void finishButton() {
+                        runOnUiThread(() -> {
+                            if (!destroyed) button.setEnabled(true);
+                        });
+                    }
+
+                    @Override
+                    public void onSuccess(String message) {
+                        runOnUiThread(() -> {
+                            if (destroyed) return;
+                            String displayMessage = message;
+                            if ("pause".equals(action)) {
+                                displayMessage = "已暂停时间流逝";
+                            } else if ("resume".equals(action)) {
+                                displayMessage = "时间继续流逝";
+                            }
+                            feedback.setText("任务执行成功：" +
+                                    (displayMessage == null || displayMessage.trim().isEmpty()
+                                            ? "操作成功" : displayMessage));
+                            feedback.setTextColor(getColor(R.color.dmp_green));
+                            button.setEnabled(true);
+                        });
+                    }
+
+                    @Override
+                    public void onUnsupported(String message) {
+                        runOnUiThread(() -> {
+                            if (destroyed) return;
+                            feedback.setText("任务执行失败：" + message);
+                            feedback.setTextColor(getColor(R.color.dmp_warning));
+                            button.setEnabled(true);
+                        });
+                    }
+
+                    @Override
+                    public void onError(String message) {
+                        runOnUiThread(() -> {
+                            if (destroyed) return;
+                            feedback.setText("任务执行失败：" +
+                                    (message == null || message.trim().isEmpty()
+                                            ? "操作失败" : message));
+                            feedback.setTextColor(getColor(R.color.dmp_warning));
+                            button.setEnabled(true);
+                        });
+                    }
+                });
+    }
+
+    private String roomActionLabel(String action) {
+        if ("startup".equals(action)) return "启动游戏";
+        if ("shutdown".equals(action)) return "关闭游戏";
+        if ("backup".equals(action)) return "快捷备份";
+        if ("save".equals(action)) return "快捷保存";
+        if ("pause".equals(action)) return "启用伪停";
+        if ("resume".equals(action)) return "关闭伪停";
+        return "操作";
+    }
+
+    private void showSettingsDialog() {
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dpToPx(20), dpToPx(4), dpToPx(20), dpToPx(4));
+
+        settingsNightSwitch = addSettingsSwitch(content,
+                getString(R.string.dmp_setting_night_mode),
+                getString(R.string.dmp_setting_night_mode_summary), nightMode,
+                checked -> {
+                    if (checked != nightMode) {
+                        toggleTheme(uiPreferences);
+                    }
+                });
+
+        LinearLayout developerOptions = new LinearLayout(this);
+        developerOptions.setOrientation(LinearLayout.VERTICAL);
+        // Keep the options hidden while developer mode is force-disabled.
+        developerOptions.setVisibility(View.GONE);
+        addSettingsSwitch(developerOptions,
+                getString(R.string.dmp_setting_android_download),
+                getString(R.string.dmp_setting_android_download_summary), androidDownloadUi,
+                checked -> {
+                    androidDownloadUi = checked;
+                    uiPreferences.edit().putBoolean(PREF_ANDROID_DOWNLOAD_UI, checked).apply();
+                });
+        addSettingsSwitch(developerOptions,
+                getString(R.string.dmp_setting_android_mod_config),
+                getString(R.string.dmp_setting_android_mod_config_summary), androidModConfigUi,
+                checked -> {
+                    androidModConfigUi = checked;
+                    uiPreferences.edit().putBoolean(PREF_ANDROID_MOD_CONFIG_UI, checked).apply();
+                });
+
+        android.widget.Switch developerModeSwitch = addSettingsSwitch(content,
+                getString(R.string.dmp_setting_developer_mode),
+                getString(R.string.dmp_setting_developer_mode_summary), developerMode,
+                checked -> {
+                    // The production build deliberately does not expose the
+                    // developer-only A-version switches.  The switch is
+                    // disabled below, but keep this guard for accessibility or
+                    // restored view state that might invoke the listener.
+                    developerMode = false;
+                    uiPreferences.edit().putBoolean(PREF_DEVELOPER_MODE, false).apply();
+                    developerOptions.setVisibility(View.GONE);
+                });
+        developerModeSwitch.setChecked(false);
+        developerModeSwitch.setEnabled(false);
+        content.addView(developerOptions, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        String downloadPath = new java.io.File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                "DMP").getAbsolutePath();
+        addSettingsInfo(content, "下载路径 " + downloadPath);
+        addSettingsInfo(content, "本app不提供云端账号登录入口，请从网页端登录");
+        TextView compatibilityInfo = addSettingsInfo(content, "本 App 适配 Linux DMP 3.2.2");
+        compatibilityInfo.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        addSettingsInfo(content, "下载卡片处于测试阶段，若显示有误属正常现象");
+
+        settingsDialog = new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.dmp_settings_title)
+                .setView(content)
+                .setNegativeButton(R.string.dmp_cancel, null)
+                .create();
+        settingsDialog.setCanceledOnTouchOutside(true);
+        settingsDialog.setOnShowListener(ignored -> applyLargeDialogCorners(settingsDialog));
+        settingsDialog.setOnDismissListener(ignored -> {
+            settingsNightSwitch = null;
+            settingsDialog = null;
+        });
+        settingsDialog.show();
+    }
+
+    private interface SettingsChangedListener {
+        void onChanged(boolean checked);
+    }
+
+    private android.widget.Switch addSettingsSwitch(
+            LinearLayout parent,
+            String title,
+            String summary,
+            boolean checked,
+            SettingsChangedListener listener) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dpToPx(8), 0, dpToPx(8));
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        TextView titleView = new TextView(this);
+        titleView.setText(title);
+        titleView.setTextColor(getColor(R.color.dmp_text_primary));
+        titleView.setTextSize(16f);
+        copy.addView(titleView);
+        row.addView(copy, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        android.widget.Switch toggle = new android.widget.Switch(this);
+        toggle.setChecked(checked);
+        toggle.setOnCheckedChangeListener((button, value) -> listener.onChanged(value));
+        row.addView(toggle, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        parent.addView(row, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return toggle;
+    }
+
+    private TextView addSettingsInfo(LinearLayout parent, String text) {
+        TextView info = new TextView(this);
+        info.setText(text);
+        info.setTextColor(getColor(R.color.dmp_text_secondary));
+        info.setTextSize(13f);
+        info.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        info.setPadding(0, dpToPx(4), 0, dpToPx(4));
+        info.setTextIsSelectable(false);
+        parent.addView(info, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return info;
     }
 
     private void refreshAll() {
@@ -827,10 +1394,17 @@ public class DmpActivity extends AppCompatActivity
         List<DmpTask> aggregate = Collections.synchronizedList(new ArrayList<>());
         AtomicInteger remaining = new AtomicInteger(targets.size());
         for (DmpServer server : targets) {
-            apiClient.fetchTasks(server, new DmpApiClient.TasksCallback() {
+            apiClient.fetchTasks(server, readPersistedWebTasks(server), new DmpApiClient.TasksCallback() {
                 private void complete(List<DmpTask> tasks) {
                     if (tasks != null) {
-                        aggregate.addAll(mergeCachedWebTasks(server, tasks));
+                        List<DmpTask> merged = mergeCachedWebTasks(server, tasks);
+                        // Background toolbar refreshes do not pass through
+                        // completeTaskRefresh(), so apply local terminal
+                        // dismissals here as well. Otherwise a row cleared
+                        // from the aggregate card can immediately recolour
+                        // the toolbar when the next poll rehydrates it.
+                        merged.removeIf(DmpActivity.this::isDismissedTerminalTask);
+                        aggregate.addAll(merged);
                     }
                     if (remaining.decrementAndGet() != 0) {
                         return;
@@ -841,7 +1415,13 @@ public class DmpActivity extends AppCompatActivity
                     }
                     runOnUiThread(() -> {
                         if (!destroyed && generation == downloadProgressGeneration) {
-                            updateDownloadProgress(snapshot);
+                            // Keep the latest background snapshot available
+                            // even before the aggregate dialog is opened. The
+                            // toolbar entry uses it to acknowledge the exact
+                            // failure token that turned the icon red.
+                            List<DmpTask> stableSnapshot = stabilizeTaskSnapshot(snapshot);
+                            prefetchedTaskSnapshot = new ArrayList<>(stableSnapshot);
+                            updateDownloadProgress(prefetchedTaskSnapshot);
                         }
                     });
                 }
@@ -866,7 +1446,72 @@ public class DmpActivity extends AppCompatActivity
         }
     }
 
+    private String taskErrorToken(@Nullable DmpTask task) {
+        if (!isFailedTask(task)) {
+            return "";
+        }
+        String server = task.server == null ? "" : task.server.id;
+        String id = task.taskId == null || task.taskId.trim().isEmpty()
+                ? task.name : task.taskId;
+        long stamp = task.updatedAt > 0L ? task.updatedAt : task.finishedAt;
+        return server + "|" + id + "|" + task.status + "|"
+                + (task.message == null ? "" : task.message) + "|" + stamp;
+    }
+
+    private void acknowledgeTaskErrors(@Nullable List<DmpTask> tasks) {
+        if (tasks == null || tasks.isEmpty()) {
+            return;
+        }
+        boolean changed = false;
+        for (DmpTask task : tasks) {
+            String token = taskErrorToken(task);
+            if (!token.isEmpty() && acknowledgedTaskErrors.add(token)) {
+                changed = true;
+            }
+        }
+        if (changed && uiPreferences != null) {
+            uiPreferences.edit().putStringSet(PREF_ACKNOWLEDGED_TASK_ERRORS,
+                    new HashSet<>(acknowledgedTaskErrors)).apply();
+        }
+    }
+
+    private void updateDownloadButtonState(@Nullable List<DmpTask> tasks) {
+        if (binding == null || binding.dmpDownloadTasks == null) {
+            return;
+        }
+        boolean active = false;
+        boolean error = false;
+        if (tasks != null) {
+            for (DmpTask task : tasks) {
+                if (task == null) {
+                    continue;
+                }
+                if (task.isRunning() && !task.isPaused() && !task.isTerminal()) {
+                    active = true;
+                }
+                String token = taskErrorToken(task);
+                if (retryFailureTasks.contains(dismissedTaskKey(task))
+                        || (!token.isEmpty() && !acknowledgedTaskErrors.contains(token))) {
+                    error = true;
+                }
+            }
+        }
+        // Download activity/error has precedence over update notices.  A
+        // yellow notification state is only shown when no task is actively
+        // running and no unacknowledged task error is present.
+        boolean notification = !error && !active && hasUnacknowledgedPlatformNotifications();
+        int tint = error ? Color.parseColor("#D9534F")
+                : active ? getColor(R.color.dmp_green)
+                : notification ? Color.parseColor("#D29B00")
+                : getColor(R.color.dmp_primary_text);
+        binding.dmpDownloadTasks.setColorFilter(tint);
+        binding.dmpDownloadTasks.setTag(error ? "error" : active ? "active"
+                : notification ? "notification" : "idle");
+        updateTaskDialogTabAppearance();
+    }
+
     private void updateDownloadProgress(List<DmpTask> tasks) {
+        updateDownloadButtonState(tasks);
         if (binding == null || roomMode) {
             if (binding != null) {
                 binding.dmpDownloadProgress.setVisibility(View.GONE);
@@ -955,6 +1600,73 @@ public class DmpActivity extends AppCompatActivity
             }
         });
         refreshVersionSnapshot(server);
+        refreshInstalledDmpVersion(server);
+    }
+
+    /**
+     * Read the DMP release installed on this host.  The API intentionally
+     * exposes the DST game build through /platform/game_version, while the
+     * DMP release is embedded in the host's Web bundle.  DmpApiClient only
+     * inspects that static index/config asset; an unreadable host stays at
+     * “读取中” instead of being incorrectly labelled as the current APK
+     * release (or as the DST game version from a legacy API route).
+     */
+    private void refreshInstalledDmpVersion(DmpServer server) {
+        long now = android.os.SystemClock.elapsedRealtime();
+        synchronized (server) {
+            if (server.dmpInstalledVersionProbeRunning
+                    || now - server.dmpInstalledVersionCheckedAt
+                    < DMP_VERSION_PROBE_INTERVAL_MS) {
+                return;
+            }
+            server.dmpInstalledVersionProbeRunning = true;
+            server.dmpInstalledVersionCheckedAt = now;
+        }
+        apiClient.fetchInstalledDmpVersion(server,
+                new DmpApiClient.InstalledVersionCallback() {
+                    @Override
+                    public void onSuccess(String version) {
+                        synchronized (server) {
+                            server.dmpInstalledVersionProbeRunning = false;
+                            server.dmpInstalledVersionCheckedAt =
+                                    android.os.SystemClock.elapsedRealtime();
+                        }
+                        runOnUiThread(() -> {
+                            if (destroyed) {
+                                return;
+                            }
+                            server.dmpInstalledVersion = version == null ? "" : version.trim();
+                            recomputeLatestInstalledDmpVersion();
+                            serverAdapter.notifyServerChanged(server.id);
+                            updateLauncherSubtitle();
+                        });
+                    }
+
+                    @Override
+                    public void onError(String message) {
+                        synchronized (server) {
+                            server.dmpInstalledVersionProbeRunning = false;
+                            server.dmpInstalledVersionCheckedAt =
+                                    android.os.SystemClock.elapsedRealtime();
+                        }
+                        runOnUiThread(() -> {
+                            if (destroyed) {
+                                return;
+                            }
+                            // Do not leave a stale release label after a
+                            // failed re-probe; the card must say “读取中”.
+                            server.dmpInstalledVersion = "";
+                            recomputeLatestInstalledDmpVersion();
+                            serverAdapter.notifyServerChanged(server.id);
+                            updateLauncherSubtitle();
+                        });
+                        // Leave the card at “读取中”; a failed probe must not
+                        // masquerade as the APK's bundled v3.2.2 release.
+                        if (BuildConfig.DEBUG) {
+                            Log.d(TAG, "DMP installed-version probe skipped: " + message);
+                        }
+                    }
+                });
     }
 
     private void refreshVersionSnapshot(DmpServer server) {
@@ -1004,11 +1716,84 @@ public class DmpActivity extends AppCompatActivity
         if (roomMode || binding == null) {
             return;
         }
-        String latest = latestDmpVersion > 0
-                ? String.valueOf(latestDmpVersion)
-                : getString(R.string.dmp_update_reading);
-        binding.dmpLauncherSubtitle.setText(
-                getString(R.string.dmp_launcher_subtitle_latest, latest));
+        String latestGame = latestDmpVersion > 0
+                ? String.valueOf(latestDmpVersion) : "读取中";
+        String base = getString(R.string.dmp_launcher_subtitle_game_latest, latestGame);
+        TextView subtitle = binding.dmpLauncherSubtitle;
+        subtitle.setText(base);
+        String installedDmp = latestInstalledDmpVersion;
+        if (installedDmp == null || installedDmp.trim().isEmpty()) {
+            return;
+        }
+        // Measure the actual toolbar width instead of branching only on a
+        // device category.  This keeps the extra DMP release label on a
+        // tablet (and on a wide landscape layout) while leaving phones with
+        // the shorter game-version subtitle.
+        subtitle.post(() -> {
+            if (destroyed || roomMode || binding == null
+                    || subtitle.getWidth() <= 0) {
+                return;
+            }
+            String full = base + " · 最新DMP版本" + installedDmp.trim();
+            Paint paint = subtitle.getPaint();
+            float available = subtitle.getWidth()
+                    - subtitle.getPaddingLeft() - subtitle.getPaddingRight();
+            if (available > 0 && paint.measureText(full) <= available) {
+                subtitle.setText(full);
+            }
+        });
+    }
+
+    private void recomputeLatestInstalledDmpVersion() {
+        String best = "";
+        if (servers != null) {
+            for (DmpServer candidate : servers) {
+                if (candidate == null || candidate.dmpInstalledVersion == null) {
+                    continue;
+                }
+                String value = candidate.dmpInstalledVersion.trim();
+                if (value.isEmpty() || compareDmpVersions(value, best) <= 0) {
+                    continue;
+                }
+                best = value;
+            }
+        }
+        latestInstalledDmpVersion = best;
+    }
+
+    private static int compareDmpVersions(String left, String right) {
+        if (right == null || right.trim().isEmpty()) {
+            return left == null || left.trim().isEmpty() ? 0 : 1;
+        }
+        if (left == null || left.trim().isEmpty()) {
+            return -1;
+        }
+        String[] a = left.trim().replaceFirst("^[vV]", "").split("\\.");
+        String[] b = right.trim().replaceFirst("^[vV]", "").split("\\.");
+        int count = Math.max(a.length, b.length);
+        for (int i = 0; i < count; i++) {
+            int av = i < a.length ? parseVersionPart(a[i]) : 0;
+            int bv = i < b.length ? parseVersionPart(b[i]) : 0;
+            if (av != bv) {
+                return av > bv ? 1 : -1;
+            }
+        }
+        return left.compareToIgnoreCase(right);
+    }
+
+    private static int parseVersionPart(String value) {
+        if (value == null || value.isEmpty()) {
+            return 0;
+        }
+        String digits = value.replaceAll("[^0-9].*", "");
+        if (digits.isEmpty()) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(digits);
+        } catch (NumberFormatException ignored) {
+            return 0;
+        }
     }
 
     private String shortenError(String message) {
@@ -1026,6 +1811,274 @@ public class DmpActivity extends AppCompatActivity
     private final Map<String, Long> singleUpdateClickAt = new LinkedHashMap<>();
     private final Map<String, Integer> singleUpdateClickCount = new LinkedHashMap<>();
 
+    private TextView createTaskDialogTab(String label, int tab) {
+        TextView tabView = new TextView(this);
+        tabView.setText(label);
+        tabView.setTextSize(15f);
+        tabView.setGravity(Gravity.CENTER);
+        tabView.setTypeface(null, android.graphics.Typeface.BOLD);
+        tabView.setPadding(dpToPx(8), 0, dpToPx(8), 0);
+        tabView.setMinWidth(dpToPx(84));
+        tabView.setOnClickListener(v -> setTaskDialogTab(tab));
+        return tabView;
+    }
+
+    private void updateTaskDialogTabAppearance() {
+        if (taskDialogTasksTab == null || taskDialogNotificationsTab == null) {
+            return;
+        }
+        boolean tasks = taskDialogTab == 0;
+        int selected = getColor(R.color.dmp_primary);
+        int normal = getColor(R.color.dmp_text_secondary);
+        boolean active = false;
+        boolean error = false;
+        if (prefetchedTaskSnapshot != null) {
+            for (DmpTask task : prefetchedTaskSnapshot) {
+                if (task == null) continue;
+                active |= task.isRunning() && !task.isPaused() && !task.isTerminal();
+                String token = taskErrorToken(task);
+                error |= retryFailureTasks.contains(dismissedTaskKey(task))
+                        || (!token.isEmpty() && !acknowledgedTaskErrors.contains(token));
+            }
+        }
+        int taskColor = error ? Color.parseColor("#D9534F")
+                : active ? getColor(R.color.dmp_green) : (tasks ? selected : normal);
+        int noticeColor = hasUnacknowledgedPlatformNotifications()
+                ? Color.parseColor("#D29B00") : (tasks ? normal : selected);
+        taskDialogTasksTab.setTextColor(taskColor);
+        taskDialogNotificationsTab.setTextColor(noticeColor);
+        taskDialogTasksTab.setBackgroundColor(tasks
+                ? getColor(R.color.dmp_primary_soft) : Color.TRANSPARENT);
+        taskDialogNotificationsTab.setBackgroundColor(!tasks
+                ? getColor(R.color.dmp_primary_soft) : Color.TRANSPARENT);
+    }
+
+    private void setTaskDialogTab(int tab) {
+        if (taskDialog == null || !taskDialog.isShowing() || taskDialogContent == null) {
+            return;
+        }
+        taskDialogTab = tab == 1 ? 1 : 0;
+        updateTaskDialogTabAppearance();
+        if (taskDialogTab == 1) {
+            acknowledgePlatformNotifications();
+            renderPlatformNotifications(taskDialogContent);
+        } else {
+            renderTaskSnapshot(taskDialogContent, prefetchedTaskSnapshot);
+            refreshTaskDialog(taskDialogContent, taskLoadGeneration);
+        }
+    }
+
+    private String aggregateGameNotificationKey(DmpServer server, DmpVersion version) {
+        if (server == null) {
+            return "";
+        }
+        String id = server.id == null ? server.host : server.id;
+        int latest = version == null ? server.dmpLatestVersion : version.latest;
+        return id + "|game|" + latest;
+    }
+
+    private String platformNotificationKey(DmpServer server, JSONObject item) {
+        if (server == null || item == null) return "";
+        String id = server.id == null ? server.host : server.id;
+        String key = item.optString("key", "").trim();
+        String token = item.optString("token", "").trim();
+        if (key.isEmpty()) {
+            key = item.optString("kind", "notice") + "|"
+                    + item.optString("detail", "");
+        }
+        return id + "|" + key + "|" + token;
+    }
+
+    private JSONArray storedPlatformNotifications(DmpServer server) {
+        if (server == null || server.id == null || server.id.trim().isEmpty()) {
+            return new JSONArray();
+        }
+        String raw = getSharedPreferences(
+                DmpJavascriptBridge.PREF_PLATFORM_NOTIFICATIONS, MODE_PRIVATE)
+                .getString(server.id, "[]");
+        try {
+            JSONArray parsed = new JSONArray(raw == null ? "[]" : raw);
+            JSONArray safe = new JSONArray();
+            for (int index = 0; index < parsed.length() && safe.length() < 120; index++) {
+                JSONObject item = parsed.optJSONObject(index);
+                if (item == null || item.optString("title", "").trim().isEmpty()
+                        || item.optString("detail", "").trim().isEmpty()) continue;
+                safe.put(item);
+            }
+            return safe;
+        } catch (JSONException ignored) {
+            return new JSONArray();
+        }
+    }
+
+    private boolean hasUnacknowledgedPlatformNotifications() {
+        if (servers == null) {
+            return false;
+        }
+        for (DmpServer server : servers) {
+            if (server == null) {
+                continue;
+            }
+            if (server.dmpVersionKnown && server.dmpLatestVersion > server.dmpLocalVersion) {
+                String key = aggregateGameNotificationKey(server, null);
+                if (!key.isEmpty() && !acknowledgedPlatformNotifications.contains(key)) {
+                    return true;
+                }
+            }
+            JSONArray notices = storedPlatformNotifications(server);
+            for (int index = 0; index < notices.length(); index++) {
+                JSONObject item = notices.optJSONObject(index);
+                String noticeKey = platformNotificationKey(server, item);
+                if (!noticeKey.isEmpty()
+                        && !acknowledgedPlatformNotifications.contains(noticeKey)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private void acknowledgePlatformNotifications() {
+        if (servers == null) {
+            return;
+        }
+        for (DmpServer server : servers) {
+            if (server == null) {
+                continue;
+            }
+            if (server.dmpVersionKnown && server.dmpLatestVersion > server.dmpLocalVersion) {
+                String key = aggregateGameNotificationKey(server, null);
+                if (!key.isEmpty()) {
+                    acknowledgedPlatformNotifications.add(key);
+                }
+            }
+            JSONArray notices = storedPlatformNotifications(server);
+            for (int index = 0; index < notices.length(); index++) {
+                String noticeKey = platformNotificationKey(server, notices.optJSONObject(index));
+                if (!noticeKey.isEmpty()) acknowledgedPlatformNotifications.add(noticeKey);
+            }
+        }
+        updateDownloadButtonState(prefetchedTaskSnapshot);
+    }
+
+    private void renderPlatformNotifications(@NonNull LinearLayout content) {
+        content.removeAllViews();
+        boolean any = false;
+        if (servers != null) {
+            for (DmpServer server : servers) {
+                JSONArray stored = storedPlatformNotifications(server);
+                for (int index = 0; index < stored.length(); index++) {
+                    JSONObject item = stored.optJSONObject(index);
+                    if (item == null) continue;
+                    any = true;
+                    String title = item.optString("title", "平台通知");
+                    String detail = item.optString("detail", "");
+                    String kind = item.optString("kind", "");
+                    addPlatformNotificationRow(content, title,
+                            "目标服务器：" + serverLabel(server), detail, v -> {
+                                if (taskDialog != null) taskDialog.dismiss();
+                                if ("game".equalsIgnoreCase(kind)) {
+                                    showUpdateDialog();
+                                } else {
+                                    openPlatformDashboard(server);
+                                }
+                            });
+                }
+                if (server == null || !server.dmpVersionKnown
+                        || server.dmpLatestVersion <= server.dmpLocalVersion) {
+                    continue;
+                }
+                any = true;
+                addPlatformNotificationRow(content, "游戏版本可更新",
+                        "目标服务器：" + serverLabel(server),
+                        "新版" + server.dmpLatestVersion + "，请及时更新", v -> {
+                            if (taskDialog != null) {
+                                taskDialog.dismiss();
+                            }
+                            showUpdateDialog();
+                        });
+            }
+        }
+        // A mod update is represented by a cached terminal mod task on
+        // installations where the host does not expose a catalogue endpoint.
+        // Keep this conservative: only rows explicitly labelled as updates
+        // are surfaced, avoiding a false notice for ordinary downloads.
+        List<DmpTask> tasks = prefetchedTaskSnapshot;
+        if (tasks != null) {
+            for (DmpTask task : tasks) {
+                if (task == null || !"mod_download".equals(task.type)) {
+                    continue;
+                }
+                String marker = ((task.name == null ? "" : task.name) + " "
+                        + (task.message == null ? "" : task.message)).toLowerCase(
+                        java.util.Locale.US);
+                if (!marker.contains("update") && !marker.contains("更新")) {
+                    continue;
+                }
+                any = true;
+                String name = task.name == null || task.name.trim().isEmpty()
+                        ? "模组" : task.name.trim();
+                addPlatformNotificationRow(content, "旧模组可更新",
+                        "目标服务器：" + serverLabel(task.server),
+                        "[" + name + "]有更新", v -> {
+                            if (taskDialog != null) {
+                                taskDialog.dismiss();
+                            }
+                            Toast.makeText(this, "请进入平台的模组设置更新模组",
+                                    Toast.LENGTH_SHORT).show();
+                        });
+            }
+        }
+        if (!any) {
+            TextView empty = new TextView(this);
+            empty.setText("暂无平台通知");
+            empty.setTextColor(getColor(R.color.dmp_text_secondary));
+            empty.setTextSize(18f);
+            empty.setGravity(Gravity.CENTER);
+            empty.setMinHeight(dpToPx(220));
+            empty.setPadding(dpToPx(12), dpToPx(30), dpToPx(12), dpToPx(30));
+            content.addView(empty, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+        // Keep the same fixed bottom feedback slot as the task tab so the
+        // dialog does not resize when a three-second acknowledgement expires.
+        mountTaskFeedback(content);
+    }
+
+    private void addPlatformNotificationRow(LinearLayout content, String title,
+                                            String target, String detail,
+                                            @Nullable View.OnClickListener click) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(dpToPx(8), dpToPx(12), dpToPx(8), dpToPx(12));
+        row.setClickable(click != null);
+        if (click != null) {
+            row.setOnClickListener(click);
+        }
+        TextView heading = new TextView(this);
+        heading.setText(title);
+        heading.setTextColor(Color.parseColor("#D29B00"));
+        heading.setTextSize(15f);
+        heading.setTypeface(null, android.graphics.Typeface.BOLD);
+        row.addView(heading);
+        TextView targetView = new TextView(this);
+        targetView.setText(target);
+        targetView.setTextColor(getColor(R.color.dmp_text_secondary));
+        targetView.setTextSize(13f);
+        row.addView(targetView);
+        TextView detailView = new TextView(this);
+        detailView.setText(detail);
+        detailView.setTextColor(getColor(R.color.dmp_text_primary));
+        detailView.setTextSize(14f);
+        row.addView(detailView);
+        content.addView(row, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        View divider = new View(this);
+        divider.setBackgroundColor(getColor(R.color.dmp_track));
+        content.addView(divider, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(1)));
+    }
+
     private void showTaskDialog() {
         if (updateDialog != null && updateDialog.isShowing()) {
             updateDialog.dismiss();
@@ -1034,6 +2087,7 @@ public class DmpActivity extends AppCompatActivity
             return;
         }
         taskLoadGeneration++;
+        taskRefreshRequestId++;
         taskDeleteRequestsInFlight = 0;
         ScrollView scrollView = new ScrollView(this);
         LinearLayout content = new LinearLayout(this);
@@ -1047,29 +2101,45 @@ public class DmpActivity extends AppCompatActivity
         titleBar.setOrientation(LinearLayout.HORIZONTAL);
         titleBar.setGravity(Gravity.CENTER_VERTICAL);
         titleBar.setPadding(dpToPx(24), dpToPx(20), dpToPx(18), 0);
-        TextView title = new TextView(this);
-        title.setText(R.string.dmp_tasks_title);
-        title.setTextSize(20f);
-        title.setTextColor(getColor(R.color.dmp_text_primary));
-        title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
-        titleBar.addView(title, new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        // The aggregate card has two independent views.  Keep the controls
+        // in the dialog title so switching tabs never rebuilds the dialog or
+        // loses the task feedback slot.
+        LinearLayout tabs = new LinearLayout(this);
+        tabs.setOrientation(LinearLayout.HORIZONTAL);
+        tabs.setGravity(Gravity.CENTER_VERTICAL);
+        taskDialogTab = 0;
+        taskDialogTasksTab = createTaskDialogTab("平台任务", 0);
+        taskDialogNotificationsTab = createTaskDialogTab("平台通知", 1);
+        tabs.addView(taskDialogTasksTab, new LinearLayout.LayoutParams(
+                0, dpToPx(40), 1f));
+        tabs.addView(taskDialogNotificationsTab, new LinearLayout.LayoutParams(
+                0, dpToPx(40), 1f));
+        titleBar.addView(tabs, new LinearLayout.LayoutParams(
+                0, dpToPx(42), 1f));
         taskDeleteSpinner = new ImageView(this);
         taskDeleteSpinner.setImageResource(android.R.drawable.ic_popup_sync);
         taskDeleteSpinner.setColorFilter(getColor(R.color.dmp_text_secondary));
         taskDeleteSpinner.setPadding(dpToPx(5), dpToPx(5), dpToPx(5), dpToPx(5));
         taskDeleteSpinner.setVisibility(View.GONE);
+        taskClearCompletedButton = new ImageButton(this);
+        taskClearCompletedButton.setImageResource(android.R.drawable.ic_menu_delete);
+        taskClearCompletedButton.setColorFilter(getColor(R.color.dmp_primary));
+        taskClearCompletedButton.setContentDescription("清除已完成下载");
+        taskClearCompletedButton.setBackgroundColor(Color.TRANSPARENT);
+        taskClearCompletedButton.setPadding(dpToPx(7), dpToPx(7), dpToPx(7), dpToPx(7));
+        taskClearCompletedButton.setOnClickListener(v -> clearCompletedTaskRows());
+        taskClearCompletedButton.setOnLongClickListener(v -> {
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle("删除全部下载任务")
+                    .setMessage("将删除当前总下载任务卡片中的全部任务记录。服务器正在执行的任务不会被 LinuxDMP 强制终止。是否继续？")
+                    .setNegativeButton(R.string.dmp_cancel, null)
+                    .setPositiveButton("全部删除", (dialog, which) -> clearAllTaskRows())
+                    .show();
+            return true;
+        });
+        titleBar.addView(taskClearCompletedButton, new LinearLayout.LayoutParams(
+                dpToPx(38), dpToPx(38)));
         titleBar.addView(taskDeleteSpinner, new LinearLayout.LayoutParams(dpToPx(34), dpToPx(34)));
-
-        taskClearFinished = new ImageButton(this);
-        taskClearFinished.setImageResource(android.R.drawable.ic_menu_delete);
-        taskClearFinished.setContentDescription("清除已完成任务");
-        taskClearFinished.setColorFilter(getColor(R.color.dmp_text_secondary));
-        taskClearFinished.setBackgroundColor(Color.TRANSPARENT);
-        taskClearFinished.setPadding(dpToPx(5), dpToPx(5), dpToPx(5), dpToPx(5));
-        taskClearFinished.setOnClickListener(v -> clearFinishedTaskRecords());
-        titleBar.addView(taskClearFinished,
-                new LinearLayout.LayoutParams(dpToPx(38), dpToPx(38)));
 
         taskDialog = new MaterialAlertDialogBuilder(this)
                 .setCustomTitle(titleBar)
@@ -1080,8 +2150,11 @@ public class DmpActivity extends AppCompatActivity
         taskDialog.setOnShowListener(ignored -> applyLargeDialogCorners(taskDialog));
         taskDialog.setOnDismissListener(ignored -> {
             taskLoadGeneration++;
+            taskRefreshRequestId++;
             taskDialog = null;
             taskDialogContent = null;
+            taskDialogTasksTab = null;
+            taskDialogNotificationsTab = null;
             taskFeedbackView = null;
             // Acknowledgements belong to one dialog session.  Clear the
             // backing value as well as the view so reopening the task center
@@ -1093,16 +2166,183 @@ public class DmpActivity extends AppCompatActivity
             }
             taskDeleteSpinnerAnimator = null;
             taskDeleteSpinner = null;
-            taskClearFinished = null;
+            taskClearCompletedButton = null;
             handler.removeCallbacks(clearTaskFeedback);
         });
         taskDialog.show();
+        updateTaskDialogTabAppearance();
         taskDialogContent = content;
         // The platform screen continuously prefetches tasks. Render that
         // snapshot immediately so opening the center never starts blank while
         // the authoritative requests are being refreshed in the background.
         renderTaskSnapshot(content, prefetchedTaskSnapshot);
+        mountTaskFeedback(content);
         refreshTaskDialog(content, taskLoadGeneration);
+    }
+
+    /**
+     * Clear only successful rows from the aggregate task card.  This is a
+     * local display operation: active/queued/failed rows are deliberately
+     * left untouched. Long-press deletion is implemented separately below.
+     */
+    private void clearCompletedTaskRows() {
+        if (taskDialog == null || !taskDialog.isShowing()) {
+            return;
+        }
+        List<DmpTask> source = prefetchedTaskSnapshot == null
+                ? Collections.emptyList() : new ArrayList<>(prefetchedTaskSnapshot);
+        List<DmpTask> completed = new ArrayList<>();
+        for (DmpTask task : source) {
+            if (isSuccessfulTask(task)) {
+                completed.add(task);
+            }
+        }
+        showTaskFeedback("正在向平台发送删除已完成任务......");
+        if (completed.isEmpty()) {
+            showTaskFeedback("任务执行成功");
+            return;
+        }
+        boolean allAccepted = true;
+        for (DmpTask task : completed) {
+            if (task == null) {
+                continue;
+            }
+            boolean accepted = true;
+            if ("transfer".equals(task.type)) {
+                // Dismiss removes the DownloadManager history row while
+                // preserving the exported file in Download/DMP/.
+                accepted = DmpJavascriptBridge.performNativeTransferAction(
+                        this, task.server, task.taskId, "dismiss");
+                // Persist the display dismissal as well. Without this, the
+                // still-prefetched transfer row is rendered again immediately
+                // after the native metadata record is removed.
+                if (accepted) {
+                    dismissTask(task);
+                }
+            } else if (isLegacyUpdateTask(task)) {
+                dismissLegacyUpdateTask(task);
+                // Keep the WebView-side tombstone in sync with the native
+                // aggregate dismissal. Otherwise a live platform WebView
+                // can sync its old completed update row back later.
+                accepted = DmpJavascriptBridge.performWebTaskAction(
+                        this, task.server, task.taskId, "delete");
+            } else {
+                dismissTask(task);
+                // The aggregate card may be cleared while a platform
+                // WebView is still alive. Persist the same opaque dismissal
+                // there so its next sync cannot resurrect the row.
+                accepted = DmpJavascriptBridge.performWebTaskAction(
+                        this, task.server, task.taskId, "delete");
+                removeCachedWebTask(task);
+            }
+            allAccepted &= accepted;
+            if (!accepted) {
+                // Keep a failed native history deletion visible so the user
+                // can retry it instead of silently losing the row.
+                continue;
+            }
+            removeTaskCardImmediately(task);
+        }
+        prefetchedTaskSnapshot.removeIf(this::isDismissedTerminalTask);
+        visibleTaskSnapshot.removeIf(this::isDismissedTerminalTask);
+        updateDownloadProgress(prefetchedTaskSnapshot);
+        if (taskDialogContent != null) {
+            if (taskDialogTab == 1) {
+                renderPlatformNotifications(taskDialogContent);
+            } else {
+                renderTaskSnapshot(taskDialogContent, prefetchedTaskSnapshot);
+                mountTaskFeedback(taskDialogContent);
+            }
+        }
+        showTaskFeedback(allAccepted ? "任务执行成功" : "任务执行失败");
+    }
+
+    /**
+     * Long-press action for the aggregate task-card trash icon.  This is a
+     * deliberate destructive display cleanup; active LinuxDMP workers remain
+     * server-owned when no safe cancellation endpoint exists, but their local
+     * Android/WebView task records are removed so the user does not have to
+     * delete dozens of rows one by one.
+     */
+    private void clearAllTaskRows() {
+        if (taskDialog == null || !taskDialog.isShowing()) {
+            return;
+        }
+        List<DmpTask> source = prefetchedTaskSnapshot == null
+                ? Collections.emptyList() : new ArrayList<>(prefetchedTaskSnapshot);
+        showTaskFeedback("正在向平台发送全部删除任务......");
+        if (source.isEmpty()) {
+            showTaskFeedback("没有可删除的任务");
+            return;
+        }
+        boolean allAccepted = true;
+        Set<String> removedTaskKeys = new HashSet<>();
+        for (DmpTask task : source) {
+            if (task == null || task.taskId == null || task.taskId.trim().isEmpty()) {
+                allAccepted = false;
+                continue;
+            }
+            boolean accepted = false;
+            if ("transfer".equals(task.type)) {
+                String operation = isSuccessfulTask(task) ? "dismiss" : "delete";
+                accepted = DmpJavascriptBridge.performNativeTransferAction(
+                        this, task.server, task.taskId, operation);
+                if (accepted && ("dismiss".equals(operation) || "delete".equals(operation))) {
+                    if (isSuccessfulTask(task)) {
+                        dismissTask(task);
+                    }
+                }
+            } else if (isLegacyUpdateTask(task)) {
+                dismissLegacyUpdateTask(task);
+                accepted = DmpJavascriptBridge.performWebTaskAction(
+                        this, task.server, task.taskId, "delete");
+            } else if ("game_update".equals(task.type)) {
+                if (task.isTerminal()) {
+                    dismissTask(task);
+                }
+                // Current game-update rows have no safe cancellation API;
+                // persist a local WebView tombstone and clear the native
+                // compatibility cache. This is display cleanup only; the
+                // server-owned worker is not terminated.
+                accepted = DmpJavascriptBridge.performWebTaskAction(
+                        this, task.server, task.taskId, "delete");
+                removeCachedWebTask(task);
+                if (task.server != null && task.server.id != null) {
+                    localUpdateTasks.remove(task.server.id);
+                    legacyUpdateStartedAt.remove(task.server.id);
+                    legacyUpdateObserved.remove(task.server.id);
+                    legacyUpdateLastUpdating.remove(task.server.id);
+                    legacyUpdateInitialVersions.remove(task.server.id);
+                    persistLocalUpdateTasks();
+                }
+            } else {
+                accepted = DmpJavascriptBridge.performWebTaskAction(
+                        this, task.server, task.taskId, "delete");
+                if (accepted) {
+                    removeCachedWebTask(task);
+                }
+            }
+            allAccepted &= accepted;
+            pendingTaskActions.remove(dismissedTaskKey(task));
+            if (accepted) {
+                removedTaskKeys.add(dismissedTaskKey(task));
+                removeTaskCardImmediately(task);
+            }
+        }
+        prefetchedTaskSnapshot.removeIf(task -> task != null
+                && removedTaskKeys.contains(dismissedTaskKey(task)));
+        visibleTaskSnapshot.removeIf(task -> task != null
+                && removedTaskKeys.contains(dismissedTaskKey(task)));
+        updateDownloadProgress(prefetchedTaskSnapshot);
+        if (taskDialogContent != null) {
+            if (taskDialogTab == 1) {
+                renderPlatformNotifications(taskDialogContent);
+            } else {
+                renderTaskSnapshot(taskDialogContent, prefetchedTaskSnapshot);
+                mountTaskFeedback(taskDialogContent);
+            }
+        }
+        showTaskFeedback(allAccepted ? "任务执行成功" : "任务执行失败");
     }
 
     private void refreshTaskDialog(LinearLayout content, int generation) {
@@ -1119,32 +2359,37 @@ public class DmpActivity extends AppCompatActivity
         List<DmpServer> targets = uniqueServers();
         if (targets.isEmpty()) {
             content.removeAllViews();
-            showTaskEmpty(content);
+            if (taskDialogTab == 1) {
+                renderPlatformNotifications(content);
+            } else {
+                showTaskEmpty(content);
+            }
             return;
         }
 
         List<DmpTask> aggregate = Collections.synchronizedList(new ArrayList<>());
         List<String> notices = Collections.synchronizedList(new ArrayList<>());
+        final int requestId = ++taskRefreshRequestId;
         AtomicInteger remaining = new AtomicInteger(targets.size());
         for (DmpServer server : targets) {
-            apiClient.fetchTasks(server, new DmpApiClient.TasksCallback() {
+            apiClient.fetchTasks(server, readPersistedWebTasks(server), new DmpApiClient.TasksCallback() {
                 @Override
                 public void onSuccess(List<DmpTask> tasks) {
                     mergeServerTasksAndComplete(server, tasks, aggregate, notices,
-                            content, generation, remaining);
+                            content, generation, requestId, remaining);
                 }
 
                 @Override
                 public void onUnsupported() {
                     mergeServerTasksAndComplete(server, new ArrayList<>(), aggregate, notices,
-                            content, generation, remaining);
+                            content, generation, requestId, remaining);
                 }
 
                 @Override
                 public void onError(String message) {
                     aggregate.addAll(mergeCachedWebTasks(server, new ArrayList<>()));
                     notices.add(getString(R.string.dmp_tasks_failed, serverLabel(server)));
-                    completeTaskRefresh(content, generation, aggregate, notices, remaining);
+                    completeTaskRefresh(content, generation, requestId, aggregate, notices, remaining);
                 }
             });
         }
@@ -1162,8 +2407,27 @@ public class DmpActivity extends AppCompatActivity
             List<String> notices,
             LinearLayout content,
             int generation,
+            int requestId,
             AtomicInteger remaining) {
         DmpTask local = localUpdateTasks.get(server.id);
+        if (isStaleUnconfirmedGameUpdate(local)) {
+            localUpdateTasks.remove(server.id);
+            removeCachedWebTask(local);
+            persistLocalUpdateTasks();
+            local = null;
+        }
+        // A pre-3.2 snapshot could leave a synthetic game-update row in
+        // `running/queued` forever without ever observing the server's
+        // updating flag.  Do not resurrect that row in the all-platform
+        // centre; a fresh request is tracked with a positive monotonic start
+        // time (or an observed server flag) and remains eligible below.
+        if (isLegacyUpdateTask(local) && local.isRunning()
+                && !hasLegacyRuntimeEvidence(server, local)) {
+            localUpdateTasks.remove(server.id);
+            removeCachedLegacyUpdateTasks(server);
+            persistLocalUpdateTasks();
+            local = null;
+        }
         // Platform WebViews are destroyed when the user leaves a server.  A
         // legacy update created from that page therefore exists only in the
         // token-free WebView snapshot, not in localUpdateTasks.  The old code
@@ -1187,7 +2451,7 @@ public class DmpActivity extends AppCompatActivity
                             updateLegacyTaskStatus(server, statusTask, updating,
                                     localVersion, latestVersion);
                             aggregate.addAll(mergeCachedWebTasks(server, tasks));
-                            completeTaskRefresh(content, generation, aggregate, notices, remaining);
+                            completeTaskRefresh(content, generation, requestId, aggregate, notices, remaining);
                         }
 
                         @Override
@@ -1195,13 +2459,13 @@ public class DmpActivity extends AppCompatActivity
                             // Keep the visible task while a transient status
                             // request fails; the next dialog refresh retries it.
                             aggregate.addAll(mergeCachedWebTasks(server, tasks));
-                            completeTaskRefresh(content, generation, aggregate, notices, remaining);
+                            completeTaskRefresh(content, generation, requestId, aggregate, notices, remaining);
                         }
                     });
             return;
         }
         aggregate.addAll(mergeCachedWebTasks(server, tasks));
-        completeTaskRefresh(content, generation, aggregate, notices, remaining);
+        completeTaskRefresh(content, generation, requestId, aggregate, notices, remaining);
     }
 
     /** Read the server-scoped WebView snapshot without exposing credentials. */
@@ -1232,7 +2496,9 @@ public class DmpActivity extends AppCompatActivity
                     continue;
                 }
                 DmpTask candidate = DmpTask.fromJson(server, item);
-                if (isLegacyUpdateTask(candidate)) {
+            if (isLegacyUpdateTask(candidate)
+                    && (candidate.serverUpdateObserved || candidate.serverLastUpdating
+                    || item.optLong("startedAt", 0L) > 0L)) {
                     return candidate;
                 }
             }
@@ -1241,6 +2507,18 @@ public class DmpActivity extends AppCompatActivity
             // renders normally and the next refresh retries the probe.
         }
         return null;
+    }
+
+    private boolean hasLegacyRuntimeEvidence(@Nullable DmpServer server,
+                                             @Nullable DmpTask task) {
+        if (!isLegacyUpdateTask(task) || server == null || server.id == null) {
+            return false;
+        }
+        if (task.serverUpdateObserved || task.serverLastUpdating) {
+            return true;
+        }
+        Long started = legacyUpdateStartedAt.get(server.id);
+        return started != null && started > 0L;
     }
 
     /** Seed the native legacy transition state from a WebView task snapshot. */
@@ -1262,9 +2540,90 @@ public class DmpActivity extends AppCompatActivity
         persistLocalUpdateTasks();
     }
 
+    /**
+     * Collapse duplicate representations from the native task API, the
+     * WebView cache and DownloadManager, then preserve the visible order from
+     * the previous snapshot.  A task's updatedAt/progress changes frequently
+     * and must never be used as a live row-order key.
+     */
+    private List<DmpTask> stabilizeTaskSnapshot(@Nullable List<DmpTask> source) {
+        LinkedHashMap<String, DmpTask> unique = new LinkedHashMap<>();
+        if (source != null) {
+            for (DmpTask task : source) {
+                if (task == null) {
+                    continue;
+                }
+                String key = taskKey(task);
+                DmpTask previous = unique.get(key);
+                if (previous == null || isPreferredTask(task, previous)) {
+                    unique.put(key, task);
+                }
+            }
+        }
+
+        List<DmpTask> ordered = new ArrayList<>(unique.size());
+        Set<String> emitted = new HashSet<>();
+        synchronized (taskStableOrder) {
+            // Existing rows retain their previous position even when their
+            // progress/status/timestamp changes between polls.
+            for (String key : taskStableOrder) {
+                DmpTask task = unique.get(key);
+                if (task != null && emitted.add(key)) {
+                    ordered.add(task);
+                }
+            }
+
+            // New rows are deterministic on their first appearance.  This
+            // avoids callback-completion order (which depends on network
+            // latency) deciding where a row lands.
+            List<DmpTask> additions = new ArrayList<>();
+            for (Map.Entry<String, DmpTask> entry : unique.entrySet()) {
+                if (!emitted.contains(entry.getKey())) {
+                    additions.add(entry.getValue());
+                }
+            }
+            additions.sort((left, right) -> {
+                boolean leftRunning = left.isRunning() && !left.isPaused();
+                boolean rightRunning = right.isRunning() && !right.isPaused();
+                if (leftRunning != rightRunning) {
+                    return leftRunning ? -1 : 1;
+                }
+                if (left.updatedAt != right.updatedAt) {
+                    return Long.compare(right.updatedAt, left.updatedAt);
+                }
+                return taskKey(left).compareTo(taskKey(right));
+            });
+            for (DmpTask task : additions) {
+                String key = taskKey(task);
+                if (emitted.add(key)) {
+                    ordered.add(task);
+                    taskStableOrder.add(key);
+                }
+            }
+
+            // Keep a bounded history so repeated one-off backup rows cannot
+            // grow this in-memory order list forever.  Rows currently visible
+            // are never evicted by this trim.
+            if (taskStableOrder.size() > 512) {
+                Set<String> visibleKeys = unique.keySet();
+                for (int index = 0; index < taskStableOrder.size()
+                        && taskStableOrder.size() > 384;) {
+                    String candidate = taskStableOrder.get(index);
+                    if (!visibleKeys.contains(candidate)) {
+                        taskStableOrder.remove(index);
+                    } else {
+                        index++;
+                    }
+                }
+            }
+        }
+        return ordered;
+    }
+
     private void completeTaskRefresh(
             LinearLayout content,
             int generation,
+            int requestId,
             List<DmpTask> aggregate,
             List<String> notices,
             AtomicInteger remaining) {
@@ -1279,27 +2638,35 @@ public class DmpActivity extends AppCompatActivity
         synchronized (notices) {
             noticeSnapshot = new ArrayList<>(notices);
         }
-        snapshot.sort(Comparator
-                .comparing((DmpTask task) -> !task.isRunning())
-                .thenComparing((DmpTask task) -> -task.updatedAt));
         snapshot.removeIf(this::isDismissedTerminalTask);
+        final List<DmpTask> stableSnapshot = stabilizeTaskSnapshot(snapshot);
         runOnUiThread(() -> {
             if (destroyed || taskDialog == null || !taskDialog.isShowing()
-                    || generation != taskLoadGeneration) {
+                    || generation != taskLoadGeneration
+                    || requestId != taskRefreshRequestId) {
                 return;
             }
-            updateDownloadProgress(snapshot);
-            prefetchedTaskSnapshot = new ArrayList<>(snapshot);
-            for (DmpTask task : snapshot) {
+            updateDownloadProgress(stableSnapshot);
+            prefetchedTaskSnapshot = new ArrayList<>(stableSnapshot);
+            for (DmpTask task : stableSnapshot) {
                 if (task != null && (task.isTerminal() || "failed".equals(task.status)
                         || "error".equals(task.status))) {
                     pendingTaskActions.remove(dismissedTaskKey(task));
                 }
             }
-            visibleTaskSnapshot = new ArrayList<>(snapshot);
+            visibleTaskSnapshot = new ArrayList<>(stableSnapshot);
+            if (taskDialogTab == 1) {
+                // Keep the notification tab stable while the task API polls
+                // in the background.  The latest snapshot is retained for
+                // the next switch back to “平台任务”.
+                renderPlatformNotifications(content);
+                handler.postDelayed(() -> refreshTaskDialog(content, generation), 2500L);
+                return;
+            }
+            int previousScrollY = captureTaskScrollY(content);
             content.removeAllViews();
             taskFeedbackView = null;
-            for (DmpTask task : snapshot) {
+            for (DmpTask task : stableSnapshot) {
                 content.addView(createTaskCard(task));
             }
             // An unreachable/legacy host may add a read-failure notice even
@@ -1307,7 +2674,7 @@ public class DmpActivity extends AppCompatActivity
             // needs to communicate the primary state clearly: there are no
             // download records.  Render the empty state first so it remains
             // prominent; notices follow as secondary diagnostics.
-            if (snapshot.isEmpty()) {
+            if (stableSnapshot.isEmpty()) {
                 showTaskEmpty(content);
             }
             for (String notice : noticeSnapshot) {
@@ -1318,9 +2685,8 @@ public class DmpActivity extends AppCompatActivity
                 noticeView.setPadding(dpToPx(8), dpToPx(10), dpToPx(8), dpToPx(10));
                 content.addView(noticeView);
             }
-            if (taskFeedback != null && !taskFeedback.trim().isEmpty()) {
-                mountTaskFeedback(content);
-            }
+            mountTaskFeedback(content);
+            restoreTaskScrollY(content, previousScrollY);
             handler.postDelayed(() -> refreshTaskDialog(content, generation), 2500L);
         });
     }
@@ -1328,19 +2694,23 @@ public class DmpActivity extends AppCompatActivity
     private void showTaskFeedback(String message) {
         taskFeedback = message == null ? "" : message;
         handler.removeCallbacks(clearTaskFeedback);
-        handler.postDelayed(clearTaskFeedback, 5000L);
+        if (taskFeedbackView != null) {
+            // The same feedback TextView is reused between refreshes.  Cancel
+            // any previous fade and restore full opacity before mounting the
+            // new acknowledgement.
+            taskFeedbackView.animate().cancel();
+            taskFeedbackView.setAlpha(1f);
+        }
+        handler.postDelayed(clearTaskFeedback, 3000L);
         if (taskDialogContent != null && taskDialog != null && taskDialog.isShowing()) {
             // Mount synchronously; do not wait for the next network-backed
             // task refresh, otherwise a slow host can consume the whole
-            // five-second lifetime before the acknowledgement is visible.
+            // three-second lifetime before the acknowledgement is visible.
             mountTaskFeedback(taskDialogContent);
         }
     }
 
     private void mountTaskFeedback(@NonNull LinearLayout content) {
-        if (taskFeedback == null || taskFeedback.trim().isEmpty()) {
-            return;
-        }
         if (taskFeedbackView == null || taskFeedbackView.getParent() != content) {
             if (taskFeedbackView != null) {
                 ViewParent previous = taskFeedbackView.getParent();
@@ -1352,28 +2722,13 @@ public class DmpActivity extends AppCompatActivity
             taskFeedbackView.setTextColor(getColor(R.color.dmp_text_secondary));
             taskFeedbackView.setTextSize(12f);
             taskFeedbackView.setPadding(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(2));
+            taskFeedbackView.setMinHeight(dpToPx(32));
             content.addView(taskFeedbackView);
         }
-        taskFeedbackView.setText(taskFeedback);
-    }
-
-    private void clearFinishedTaskRecords() {
-        List<DmpTask> snapshot = new ArrayList<>(visibleTaskSnapshot);
-        int count = 0;
-        for (DmpTask task : snapshot) {
-            if (task != null && task.isTerminal()) {
-                dismissTask(task);
-                if ("transfer".equals(task.type)) {
-                    DmpJavascriptBridge.performNativeTransferAction(
-                            this, task.server, task.taskId, "delete");
-                }
-                count++;
-            }
-        }
-        showTaskFeedback(count > 0 ? "已清除 " + count + " 条已完成任务" : "没有可清除的已完成任务");
-        if (taskDialogContent != null) {
-            refreshTaskDialog(taskDialogContent, taskLoadGeneration);
-        }
+        taskFeedbackView.animate().cancel();
+        String message = taskFeedback == null ? "" : taskFeedback;
+        taskFeedbackView.setText(message);
+        taskFeedbackView.setAlpha(message.trim().isEmpty() ? 0f : 1f);
     }
 
     private void showTaskEmpty(LinearLayout content) {
@@ -1394,18 +2749,75 @@ public class DmpActivity extends AppCompatActivity
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
     }
 
+    /** Capture the aggregate card's viewport before replacing task rows. */
+    private int captureTaskScrollY(@Nullable LinearLayout content) {
+        if (content == null) {
+            return 0;
+        }
+        ViewParent parent = content.getParent();
+        return parent instanceof ScrollView ? ((ScrollView) parent).getScrollY() : 0;
+    }
+
+    /** Restore the viewport after the new row heights have been laid out. */
+    private void restoreTaskScrollY(@Nullable LinearLayout content, int scrollY) {
+        if (content == null || scrollY <= 0) {
+            return;
+        }
+        ViewParent parent = content.getParent();
+        if (!(parent instanceof ScrollView)) {
+            return;
+        }
+        ScrollView scrollView = (ScrollView) parent;
+        content.post(() -> scrollView.scrollTo(0, Math.max(0, scrollY)));
+    }
+
     private void renderTaskSnapshot(LinearLayout content, List<DmpTask> tasks) {
         if (content == null) return;
+        int previousScrollY = captureTaskScrollY(content);
         content.removeAllViews();
         List<DmpTask> snapshot = tasks == null ? Collections.emptyList() : new ArrayList<>(tasks);
         snapshot.removeIf(this::isDismissedTerminalTask);
+        snapshot = stabilizeTaskSnapshot(snapshot);
         if (snapshot.isEmpty()) {
             showTaskEmpty(content);
+            restoreTaskScrollY(content, previousScrollY);
             return;
         }
-        snapshot.sort(Comparator.comparing((DmpTask task) -> !task.isRunning())
-                .thenComparing((DmpTask task) -> -task.updatedAt));
         for (DmpTask task : snapshot) content.addView(createTaskCard(task));
+        restoreTaskScrollY(content, previousScrollY);
+    }
+
+    private boolean isRetryableTask(@Nullable DmpTask task) {
+        if (task == null || task.status == null) return false;
+        String status = task.status.toLowerCase(java.util.Locale.US);
+        return "success".equals(status) || "complete".equals(status)
+                || "completed".equals(status) || "done".equals(status)
+                || "failed".equals(status) || "error".equals(status);
+    }
+
+    private boolean isSuccessfulTask(@Nullable DmpTask task) {
+        if (task == null || task.status == null) return false;
+        String status = task.status.toLowerCase(java.util.Locale.US);
+        return "success".equals(status) || "complete".equals(status)
+                || "completed".equals(status) || "done".equals(status);
+    }
+
+    private boolean isFailedTask(@Nullable DmpTask task) {
+        if (task == null || task.status == null) return false;
+        String status = task.status.toLowerCase(java.util.Locale.US);
+        return "failed".equals(status) || "error".equals(status);
+    }
+
+    /** Transfer metadata currently marks backup downloads as `transfer`.
+     * Preserve a blue bar for future upload records without changing the
+     * WebView bridge contract. */
+    private boolean isUploadTask(@Nullable DmpTask task) {
+        if (task == null || task.type == null) return false;
+        if (task.upload) return true;
+        String marker = ((task.name == null ? "" : task.name) + " "
+                + (task.stage == null ? "" : task.stage)).toLowerCase(java.util.Locale.US);
+        return marker.contains("upload") || marker.contains("上传")
+                || marker.contains("transfer up") || marker.contains("上载");
     }
 
     private View createTaskCard(DmpTask task) {
@@ -1429,27 +2841,33 @@ public class DmpActivity extends AppCompatActivity
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = new TextView(this);
-         title.setText("game_update".equals(task.type)
-                 ? getString(R.string.dmp_task_update)
-                 : "transfer".equals(task.type) ? "传输" : getString(R.string.dmp_task_mod));
+        String taskTitle = "game_update".equals(task.type)
+                ? getString(R.string.dmp_task_update)
+                : task.name == null || task.name.trim().isEmpty()
+                ? ("transfer".equals(task.type) ? "传输" : getString(R.string.dmp_task_mod))
+                : task.name.trim();
+        title.setText(taskTitle);
         title.setTextColor(getColor(R.color.dmp_text_primary));
         title.setTextSize(16f);
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         header.addView(title, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         if ("transfer".equals(task.type)) {
-            if ("error".equals(task.status) || "failed".equals(task.status)) {
+            if (isRetryableTask(task)) {
                 header.addView(createTaskActionButton(task, "retry"));
             }
             if (!task.taskId.isEmpty()) {
-                header.addView(createTaskActionButton(task, "delete"));
+                // Removing a completed backup from the task list must not
+                // remove the exported file in Download/DMP. Active/failed
+                // transfers still use a force-delete action.
+                header.addView(createTaskActionButton(task,
+                        isSuccessfulTask(task) ? "dismiss" : "delete"));
             }
         } else if (!"game_update".equals(task.type)) {
-            if (task.isRunning() || task.isPaused()) {
-                header.addView(createTaskActionButton(task,
-                        task.isPaused() ? "resume" : "pause"));
-            }
-            if ("error".equals(task.status) || "failed".equals(task.status)) {
+            // The native all-platform card is intentionally limited to
+            // retry/delete actions.  Pause/continue belongs to the per-
+            // platform WebView task card, whose queue owns the operation.
+            if (isRetryableTask(task)) {
                 header.addView(createTaskActionButton(task, "retry"));
             }
             if (!task.taskId.isEmpty()) {
@@ -1476,77 +2894,64 @@ public class DmpActivity extends AppCompatActivity
         }
         body.addView(header);
 
-        TextView target = new TextView(this);
-        target.setText("transfer".equals(task.type)
-                ? getString(R.string.dmp_task_server, serverLabel(task.server))
-                : !"game_update".equals(task.type)
-                ? getString(R.string.dmp_task_server, serverLabel(task.server)) + " · 房间" + taskRoomNumber(task)
-                : getString(R.string.dmp_task_server, serverLabel(task.server)));
-        target.setTextColor(getColor(R.color.dmp_text_secondary));
-        target.setTextSize(13f);
-        target.setPadding(0, dpToPx(3), 0, 0);
-        body.addView(target);
-
-        if (!"game_update".equals(task.type)) {
-            TextView room = new TextView(this);
-            room.setText("transfer".equals(task.type)
-                    ? "传输文件 · " + (task.name.isEmpty() ? "—" : task.name)
-                    : getString(R.string.dmp_task_room, task.name.isEmpty() ? "—" : task.name));
-            room.setTextColor(getColor(R.color.dmp_text_secondary));
-            room.setTextSize(13f);
-            room.setPadding(0, dpToPx(2), 0, dpToPx(7));
-            body.addView(room);
-        } else {
-            target.setPadding(0, dpToPx(3), 0, dpToPx(7));
-        }
-
-        TextView state = new TextView(this);
-        if ("game_update".equals(task.type)) {
+        boolean gameUpdate = "game_update".equals(task.type);
+        boolean successful = isSuccessfulTask(task);
+        boolean failed = isFailedTask(task);
+        TextView details = new TextView(this);
+        details.setTextColor(getColor(R.color.dmp_text_secondary));
+        details.setTextSize(13f);
+        details.setPadding(0, dpToPx(4), 0, dpToPx(2));
+        if (gameUpdate) {
             String updateStatus = task.status == null ? "" : task.status.toLowerCase(java.util.Locale.US);
-            if ("success".equals(updateStatus) || "complete".equals(updateStatus)
-                    || "completed".equals(updateStatus) || "done".equals(updateStatus)) {
-                state.setText("后台更新完成");
-            } else if ("failed".equals(updateStatus) || "error".equals(updateStatus)) {
-                state.setText("后台更新失败");
-            } else if ("cancelled".equals(updateStatus) || "canceled".equals(updateStatus)) {
-                state.setText("后台更新已取消");
-            } else {
-                state.setText("后台更新中");
+            String stateText = "后台更新中";
+            if (successful) stateText = "后台更新完成";
+            else if (failed) stateText = "后台更新失败";
+            else if ("cancelled".equals(updateStatus) || "canceled".equals(updateStatus)) {
+                stateText = "后台更新已取消";
             }
+            details.setText(getString(R.string.dmp_task_server, serverLabel(task.server))
+                    + " · " + stateText);
         } else {
-            if ("transfer".equals(task.type)) {
-                state.setText(transferStatusText(task.status));
+            String byteText;
+            if (successful && task.totalBytes > 0L) {
+                byteText = formatBytes(task.totalBytes);
+            } else if (task.totalBytes > 0L) {
+                // A few DMP versions expose the total size and percentage but
+                // omit the downloaded-byte counter. Estimate the first value
+                // from the percentage so the card never regresses to 0 B.
+                long completedBytes = task.completedBytes > 0L
+                        ? task.completedBytes
+                        : Math.round(task.totalBytes * task.progress / 100d);
+                byteText = formatBytes(completedBytes) + " / " + formatBytes(task.totalBytes);
             } else {
-                String stageText = taskStageText(task.stage);
-                // “等待中 · 等待 · 0.0%” repeats the same state twice.  A
-                // queued task already communicates that it is waiting, so
-                // keep the compact form while retaining the stage for active
-                // download/install/restart phases.
-                if ("等待".equals(stageText)) {
-                    state.setText(getString(R.string.dmp_task_progress_compact,
-                            taskStatusText(task.status), task.progress));
-                } else {
-                    state.setText(getString(R.string.dmp_task_progress,
-                            taskStatusText(task.status), stageText, task.progress));
-                }
+                // When no byte size is available, the percentage is the only
+                // useful progress value and must remain visible in row two.
+                byteText = String.format(java.util.Locale.US, "%.1f%%", task.progress);
             }
+            details.setText(byteText + "  "
+                    + getString(R.string.dmp_task_server, serverLabel(task.server)));
         }
-        state.setTextColor(getColor(R.color.dmp_text_primary));
-        state.setTextSize(13f);
-        body.addView(state);
+        body.addView(details);
 
-        // Backend game updates expose a running flag rather than byte-level
-        // progress. Keep a continuous indeterminate loading bar while the
-        // server is working, then replace it with the completion text.
-        if (!task.isTerminal()) {
+        // Completed downloads intentionally have no third row. Failed rows
+        // retain a red bar so the failure remains visible for retry; active
+        // download/upload rows use green/blue respectively.
+        boolean showProgress = !successful && (!gameUpdate || !task.isTerminal() || failed);
+        if (showProgress) {
             ProgressBar progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-            boolean legacyIndeterminate = "game_update".equals(task.type)
+            boolean legacyIndeterminate = gameUpdate
                     || (isLegacyUpdateTask(task) && task.isRunning() && task.progress <= 0);
             progress.setIndeterminate(legacyIndeterminate);
             if (!legacyIndeterminate) {
                 progress.setMax(1000);
                 progress.setProgress((int) Math.round(task.progress * 10));
             }
+            int progressColor = failed
+                    ? Color.parseColor("#D9534F")
+                    : isUploadTask(task) ? getColor(R.color.dmp_blue) : getColor(R.color.dmp_green);
+            progress.setProgressTintList(ColorStateList.valueOf(progressColor));
+            progress.setProgressBackgroundTintList(ColorStateList.valueOf(
+                    getColor(R.color.dmp_track)));
             LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(6));
             progressParams.topMargin = dpToPx(8);
@@ -1554,24 +2959,6 @@ public class DmpActivity extends AppCompatActivity
             body.addView(progress, progressParams);
         }
 
-        // A legacy server has no byte counters for a host-wide game update;
-        // do not add a lone em dash below the progress bar, which creates a
-        // visually empty extra row.  Transfer and mod tasks keep their byte
-        // line (including the unknown-value dash when appropriate).
-        if (!"game_update".equals(task.type)
-                || task.totalBytes > 0L || task.speedBytesPerSecond > 0d) {
-            TextView bytes = new TextView(this);
-            String byteText = task.totalBytes > 0
-                    ? formatBytes(task.completedBytes) + " / " + formatBytes(task.totalBytes)
-                    : "—";
-            if (task.speedBytesPerSecond > 0) {
-                byteText += " · " + formatBytes((long) task.speedBytesPerSecond) + "/s";
-            }
-            bytes.setText(byteText);
-            bytes.setTextColor(getColor(R.color.dmp_text_secondary));
-            bytes.setTextSize(12f);
-            body.addView(bytes);
-        }
         card.addView(body);
         LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1599,7 +2986,12 @@ public class DmpActivity extends AppCompatActivity
                 && "game_update".equals(task.type)
                 && task.taskId != null
                 && (task.taskId.startsWith("legacy-update-")
-                || task.taskId.startsWith("android-game-update-"));
+                || task.taskId.startsWith("android-game-update-")
+                // The WebView bridge uses a deterministic server-scoped id
+                // for the old /dashboard/exec/game flow.  Treat that row as
+                // legacy too; otherwise an unconfirmed preference with
+                // id=game_update:<server> bypasses all stale-row filtering.
+                || task.taskId.startsWith("game_update:"));
     }
 
     private void rememberUpdateTask(DmpServer server, @Nullable DmpTask task) {
@@ -1912,14 +3304,7 @@ public class DmpActivity extends AppCompatActivity
                 if (item == null) {
                     continue;
                 }
-                String id = item.optString("taskID", "").trim();
-                if (id.isEmpty()) {
-                    id = item.optString("serverTaskID", "").trim();
-                }
-                if (id.isEmpty()) {
-                    id = item.optString("id", "").trim();
-                }
-                if (!task.taskId.equals(id)) {
+                if (!DmpJavascriptBridge.webTaskMatches(item, task.taskId)) {
                     kept.put(item);
                 }
             }
@@ -1952,19 +3337,84 @@ public class DmpActivity extends AppCompatActivity
         }
     }
 
+    /** Replace a retried row in the in-memory snapshots before the next poll. */
+    private void replaceTaskInMemorySnapshots(@Nullable DmpTask previous,
+                                              @Nullable DmpTask replacement) {
+        if (previous == null || replacement == null) {
+            return;
+        }
+        String key = taskKey(previous);
+        prefetchedTaskSnapshot = replaceTaskInSnapshot(prefetchedTaskSnapshot, key, replacement);
+        visibleTaskSnapshot = replaceTaskInSnapshot(visibleTaskSnapshot, key, replacement);
+        updateDownloadProgress(prefetchedTaskSnapshot);
+    }
+
+    private List<DmpTask> replaceTaskInSnapshot(@Nullable List<DmpTask> source,
+                                                String key,
+                                                DmpTask replacement) {
+        List<DmpTask> updated = source == null
+                ? new ArrayList<>() : new ArrayList<>(source);
+        for (int index = 0; index < updated.size(); index++) {
+            DmpTask existing = updated.get(index);
+            if (existing != null && key.equals(taskKey(existing))) {
+                updated.set(index, replacement);
+            }
+        }
+        return updated;
+    }
+
+    /** Persist the queued state so a later WebView recreation sees the retry. */
+    private void persistRetriedWebTask(@Nullable DmpTask previous,
+                                       @Nullable DmpTask replacement) {
+        if (previous == null || replacement == null || previous.server == null
+                || previous.server.id == null || previous.server.id.trim().isEmpty()) {
+            return;
+        }
+        SharedPreferences preferences = getSharedPreferences(
+                DmpJavascriptBridge.PREF_WEB_DOWNLOAD_TASKS, MODE_PRIVATE);
+        String payload = preferences.getString(previous.server.id, "");
+        if (payload == null || payload.trim().isEmpty()) {
+            return;
+        }
+        String wanted = taskKey(previous);
+        try {
+            JSONObject wrapper = new JSONObject(payload);
+            JSONArray source = wrapper.optJSONArray("tasks");
+            if (source == null) return;
+            JSONArray updated = new JSONArray();
+            for (int index = 0; index < source.length(); index++) {
+                JSONObject item = source.optJSONObject(index);
+                if (item == null) continue;
+                DmpTask cached = DmpTask.fromJson(previous.server, item);
+                if (wanted.equals(taskKey(cached))) {
+                    item.put("status", "queued");
+                    item.put("stage", "queued");
+                    item.put("progress", 0);
+                    item.put("progressKnown", false);
+                    item.put("updatedAt", replacement.updatedAt > 0L
+                            ? replacement.updatedAt : System.currentTimeMillis());
+                    item.put("finishedAt", JSONObject.NULL);
+                    if (replacement.fileUrl != null && !replacement.fileUrl.trim().isEmpty()) {
+                        item.put("file_url", replacement.fileUrl);
+                    }
+                }
+                updated.put(item);
+            }
+            wrapper.put("tasks", updated);
+            preferences.edit().putString(previous.server.id, wrapper.toString()).apply();
+        } catch (JSONException ignored) {
+            // A malformed optional cache must not block the successful retry.
+        }
+    }
+
     private ImageButton createTaskActionButton(DmpTask task, String action) {
         ImageButton button = new ImageButton(this);
-        button.setImageResource("pause".equals(action) ? android.R.drawable.ic_media_pause
-                : "resume".equals(action) ? android.R.drawable.ic_media_play
-                : "retry".equals(action) ? android.R.drawable.ic_popup_sync
+        button.setImageResource("retry".equals(action) ? android.R.drawable.ic_popup_sync
                 : android.R.drawable.ic_menu_delete);
-        // Row actions use the DMP accent (the dialog header's clear-all icon
-        // intentionally remains muted).  This keeps the trash icon visually
-        // distinct from the status text while matching the pause/cancel tools.
+        // Row actions use the DMP accent. Keep the trash/retry icons visually
+        // distinct from the status text while matching the compact task card.
         button.setColorFilter(getColor(R.color.dmp_primary));
-        button.setContentDescription("pause".equals(action) ? getString(R.string.dmp_task_pause)
-                : "resume".equals(action) ? getString(R.string.dmp_task_resume)
-                : "retry".equals(action) ? "重试"
+        button.setContentDescription("retry".equals(action) ? "重下"
                 : getString(R.string.dmp_task_delete));
         button.setBackgroundColor(Color.TRANSPARENT);
         button.setPadding(dpToPx(7), dpToPx(7), dpToPx(7), dpToPx(7));
@@ -1985,28 +3435,31 @@ public class DmpActivity extends AppCompatActivity
         button.setEnabled(false);
         pendingTaskActions.add(dismissedTaskKey(task));
         animateTaskCardPending(button);
-        String feedbackAction = "pause".equals(action) ? "暂停"
-                : "resume".equals(action) ? "继续"
-                : "retry".equals(action) ? "重试" : "删除";
-        showTaskFeedback("正在发送" + feedbackAction + "信息……");
+        String feedbackAction = "retry".equals(action) ? "重下"
+                : "dismiss".equals(action) ? "删除已完成" : "删除";
+        showTaskFeedback("正在向平台发送" + feedbackAction + "任务......");
         startTaskDeleteIndicator(action);
 
         if ("transfer".equals(task.type)
-                && ("delete".equals(action) || "retry".equals(action))) {
+                && ("delete".equals(action) || "dismiss".equals(action)
+                || "retry".equals(action))) {
             boolean accepted = DmpJavascriptBridge.performNativeTransferAction(
-                    this, task.server, task.taskId, "retry".equals(action) ? "retry" : "delete");
+                    this, task.server, task.taskId,
+                    "retry".equals(action) ? "retry"
+                            : "dismiss".equals(action) ? "dismiss" : "delete");
             finishTaskDeleteIndicator(action);
             if (accepted) {
-                if ("delete".equals(action) || "retry".equals(action)) {
+                if ("delete".equals(action) || "dismiss".equals(action)
+                        || "retry".equals(action)) {
                     dismissTask(task);
                 }
-                showTaskFeedback("已执行");
+                showTaskFeedback("任务执行成功");
                 if (taskDialogContent != null) {
                     refreshTaskDialog(taskDialogContent, taskLoadGeneration);
                 }
             } else {
                 button.setEnabled(true);
-                showTaskFeedback("执行失败，请重试");
+                showTaskFeedback("任务执行失败");
             }
             return;
         }
@@ -2019,10 +3472,103 @@ public class DmpActivity extends AppCompatActivity
         // normal five-second feedback/refresh behavior.
         if ("delete".equals(action) && isLegacyUpdateTask(task)) {
             finishTaskDeleteIndicator(action);
+            boolean accepted = DmpJavascriptBridge.performWebTaskAction(
+                    this, task.server, task.taskId, "delete");
+            if (!accepted) {
+                button.setEnabled(true);
+                pendingTaskActions.remove(dismissedTaskKey(task));
+                showTaskFeedback("任务执行失败");
+                return;
+            }
             dismissLegacyUpdateTask(task);
-            showTaskFeedback("已执行");
+            showTaskFeedback("任务执行成功");
             if (taskDialogContent != null) {
                 refreshTaskDialog(taskDialogContent, taskLoadGeneration);
+            }
+            return;
+        }
+
+        // DMP 3.2 has no generic /tasks retry action.  A terminal mod row is
+        // restarted through the same /v3/mod/download POST used by the
+        // catalogue page; do this before the local delete-only compatibility
+        // path below so a native aggregate retry really reaches the server.
+        if ("retry".equals(action) && "mod_download".equals(task.type)) {
+            apiClient.retryModDownload(task, new DmpApiClient.TaskActionCallback() {
+                @Override
+                public void onSuccess(DmpTask replacement) {
+                    runOnUiThread(() -> {
+                        finishTaskDeleteIndicator(action);
+                        button.setEnabled(true);
+                        pendingTaskActions.remove(dismissedTaskKey(task));
+                        retryFailureTasks.remove(dismissedTaskKey(task));
+                        persistRetriedWebTask(task, replacement);
+                        replaceTaskInMemorySnapshots(task, replacement);
+                        if (taskDialogContent != null) {
+                            if (taskDialogTab == 1) {
+                                renderPlatformNotifications(taskDialogContent);
+                            } else {
+                                renderTaskSnapshot(taskDialogContent, prefetchedTaskSnapshot);
+                            }
+                        }
+                        showTaskFeedback("任务执行成功");
+                        if (taskDialogContent != null) {
+                            refreshTaskDialog(taskDialogContent, taskLoadGeneration);
+                        }
+                    });
+                }
+
+                @Override
+                public void onUnsupported() {
+                    runOnUiThread(() -> {
+                        finishTaskDeleteIndicator(action);
+                        button.setEnabled(true);
+                        pendingTaskActions.remove(dismissedTaskKey(task));
+                        retryFailureTasks.add(dismissedTaskKey(task));
+                        updateDownloadProgress(prefetchedTaskSnapshot);
+                        showTaskFeedback("任务执行失败");
+                    });
+                }
+
+                @Override
+                public void onError(String message) {
+                    runOnUiThread(() -> {
+                        finishTaskDeleteIndicator(action);
+                        button.setEnabled(true);
+                        pendingTaskActions.remove(dismissedTaskKey(task));
+                        retryFailureTasks.add(dismissedTaskKey(task));
+                        updateDownloadProgress(prefetchedTaskSnapshot);
+                        showTaskFeedback("任务执行失败");
+                    });
+                }
+            });
+            return;
+        }
+
+        // DMP 3.2 intentionally removed the old /tasks action endpoint. The
+        // WebView bridge still owns a durable, token-free snapshot for each
+        // mod download, so only local deletion is supported here. Pause and
+        // continue are deliberately unavailable because LinuxDMP cannot
+        // safely resume a server-owned SteamCMD worker.
+        if (!"game_update".equals(task.type) && "delete".equals(action)) {
+            boolean accepted = DmpJavascriptBridge.performWebTaskAction(
+                    this, task.server, task.taskId, action);
+            finishTaskDeleteIndicator(action);
+            if (accepted) {
+                if ("delete".equals(action)) {
+                    if (task.isTerminal()) {
+                        dismissTask(task);
+                    }
+                    removeCachedWebTask(task);
+                    removeTaskCardImmediately(task);
+                }
+                showTaskFeedback("任务执行成功");
+                if (taskDialogContent != null) {
+                    refreshTaskDialog(taskDialogContent, taskLoadGeneration);
+                }
+            } else {
+                button.setEnabled(true);
+                pendingTaskActions.remove(dismissedTaskKey(task));
+                showTaskFeedback("任务执行失败");
             }
             return;
         }
@@ -2041,7 +3587,7 @@ public class DmpActivity extends AppCompatActivity
             removeCachedWebTask(task);
             taskDialogInteractionLockedUntil = 0L;
             removeTaskCardImmediately(task);
-            showTaskFeedback("已执行");
+            showTaskFeedback("任务执行成功");
             if (taskDialogContent != null) {
                 refreshTaskDialog(taskDialogContent, taskLoadGeneration);
             }
@@ -2058,7 +3604,7 @@ public class DmpActivity extends AppCompatActivity
                         if (replacement != null && !replacement.taskId.isEmpty()) {
                             rememberUpdateTask(task.server, replacement);
                         }
-                        showTaskFeedback(started ? "已执行" : "服务器未接受更新");
+                        showTaskFeedback(started ? "任务执行成功" : "任务执行失败");
                         if (taskDialogContent != null) {
                             refreshTaskDialog(taskDialogContent, taskLoadGeneration);
                         }
@@ -2070,7 +3616,7 @@ public class DmpActivity extends AppCompatActivity
                     runOnUiThread(() -> {
                         finishTaskDeleteIndicator(action);
                         button.setEnabled(true);
-                        showTaskFeedback("执行失败，请重试");
+                        showTaskFeedback("任务执行失败");
                     });
                 }
 
@@ -2079,7 +3625,7 @@ public class DmpActivity extends AppCompatActivity
                     runOnUiThread(() -> {
                         finishTaskDeleteIndicator(action);
                         button.setEnabled(true);
-                        showTaskFeedback("执行失败，请重试");
+                        showTaskFeedback("任务执行失败");
                     });
                 }
             });
@@ -2092,8 +3638,11 @@ public class DmpActivity extends AppCompatActivity
         if ("delete".equals(action) && "game_update".equals(task.type)
                 && task.isTerminal()) {
             finishTaskDeleteIndicator(action);
+            DmpJavascriptBridge.performWebTaskAction(
+                    this, task.server, task.taskId, "delete");
             dismissTask(task);
-            showTaskFeedback("已执行");
+            removeCachedWebTask(task);
+            showTaskFeedback("任务执行成功");
             if (taskDialogContent != null) {
                 refreshTaskDialog(taskDialogContent, taskLoadGeneration);
             }
@@ -2108,7 +3657,7 @@ public class DmpActivity extends AppCompatActivity
                     if (task.isTerminal()) {
                         dismissTask(task);
                     }
-                    showTaskFeedback("已执行");
+                    showTaskFeedback("任务执行成功");
                     if (taskDialogContent != null) {
                         refreshTaskDialog(taskDialogContent, taskLoadGeneration);
                     }
@@ -2120,7 +3669,7 @@ public class DmpActivity extends AppCompatActivity
                 runOnUiThread(() -> {
                     finishTaskDeleteIndicator(action);
                     button.setEnabled(true);
-                    showTaskFeedback("服务器不支持此操作");
+                    showTaskFeedback("任务执行失败");
                 });
             }
 
@@ -2129,7 +3678,7 @@ public class DmpActivity extends AppCompatActivity
                 runOnUiThread(() -> {
                     finishTaskDeleteIndicator(action);
                     button.setEnabled(true);
-                    showTaskFeedback("执行失败，请重试");
+                    showTaskFeedback("任务执行失败");
                 });
             }
         });
@@ -2554,9 +4103,84 @@ public class DmpActivity extends AppCompatActivity
     private List<DmpServer> uniqueServers() {
         LinkedHashMap<String, DmpServer> unique = new LinkedHashMap<>();
         for (DmpServer server : servers) {
-            unique.put(server.baseUrl().toLowerCase(), server);
+            if (server == null) {
+                continue;
+            }
+            // A server entry is the task namespace.  Do not collapse two
+            // saved entries merely because they currently share a host/port:
+            // they may use different tokens, rooms, or cached WebView queues.
+            String key = server.id == null || server.id.trim().isEmpty()
+                    ? server.baseUrl().toLowerCase(Locale.ROOT) : server.id.trim();
+            unique.put(key, server);
+        }
+        /*
+         * WebView queues are persisted per server id.  A task can therefore
+         * outlive a temporarily removed/renamed launcher card; omitting that
+         * namespace made the all-platform centre disagree with the platform
+         * centre (and left its toolbar state invisible).  Rehydrate a
+         * token-free, display-only server shell from the queue wrapper.  The
+         * live API request may fail without a token, but mergeCachedWebTasks()
+         * still renders the exact persisted task rows and native transfers.
+         */
+        SharedPreferences queuePreferences = getSharedPreferences(
+                DmpJavascriptBridge.PREF_WEB_DOWNLOAD_TASKS, MODE_PRIVATE);
+        for (Map.Entry<String, ?> entry : queuePreferences.getAll().entrySet()) {
+            String id = entry.getKey();
+            if (id == null || id.trim().isEmpty() || unique.containsKey(id)) {
+                continue;
+            }
+            if (!(entry.getValue() instanceof String)) {
+                continue;
+            }
+            try {
+                JSONObject wrapper = new JSONObject((String) entry.getValue());
+                JSONArray tasks = wrapper.optJSONArray("tasks");
+                if (tasks == null || tasks.length() == 0) {
+                    continue;
+                }
+                String host = wrapper.optString("host", "").trim();
+                if (host.isEmpty()) {
+                    continue;
+                }
+                String protocol = wrapper.optString("protocol", "http");
+                int port = wrapper.optInt("port", "https".equalsIgnoreCase(protocol) ? 443 : 80);
+                String remark = wrapper.optString("remark", "").trim();
+                if (remark.isEmpty()) {
+                    for (int index = 0; index < tasks.length(); index++) {
+                        JSONObject task = tasks.optJSONObject(index);
+                        if (task == null) continue;
+                        remark = task.optString("serverName", "").trim();
+                        if (!remark.isEmpty()) break;
+                    }
+                }
+                if (remark.isEmpty()) remark = host;
+                unique.put(id, new DmpServer(id, host, port, protocol, "", remark));
+            } catch (JSONException ignored) {
+                // A malformed/stale preference cannot block other servers.
+            }
         }
         return new ArrayList<>(unique.values());
+    }
+
+    /** Read the token-free WebView task snapshot for one platform. */
+    private JSONArray readPersistedWebTasks(DmpServer server) {
+        JSONArray empty = new JSONArray();
+        if (server == null || server.id == null || server.id.trim().isEmpty()) {
+            return empty;
+        }
+        String payload = getSharedPreferences(
+                DmpJavascriptBridge.PREF_WEB_DOWNLOAD_TASKS, MODE_PRIVATE)
+                .getString(server.id, "");
+        if (payload == null || payload.trim().isEmpty()) {
+            return empty;
+        }
+        try {
+            JSONObject wrapper = new JSONObject(payload);
+            JSONArray tasks = wrapper.optJSONArray("tasks");
+            return tasks == null ? empty : tasks;
+        } catch (JSONException ignored) {
+            return empty;
+        }
     }
 
     /**
@@ -2567,10 +4191,30 @@ public class DmpActivity extends AppCompatActivity
     private List<DmpTask> mergeCachedWebTasks(DmpServer server, List<DmpTask> apiTasks) {
         LinkedHashMap<String, DmpTask> merged = new LinkedHashMap<>();
         for (DmpTask task : apiTasks) {
+            // Legacy dashboards only expose a boolean update flag.  Their
+            // WebView cache can therefore contain a synthetic "running" row
+            // even after the update request was never started (or after the
+            // old process has already finished).  A real legacy update is
+            // confirmed by the status probe and carries one of the two
+            // bridge flags below; unconfirmed cached rows must not be allowed
+            // to resurrect the permanent "后台更新中" card.
+            if (isUnconfirmedCachedLegacyUpdate(server, task)) {
+                continue;
+            }
+            if (isStaleUnconfirmedGameUpdate(task)) {
+                continue;
+            }
+            // Some 3.2/transition endpoints emit an empty mod-download row
+            // while the real task has not been created yet.  It has no mod,
+            // room, name, or byte counters and can never be acted on; showing
+            // it leaves a permanent “下载模组：— · 0.0%” card in the queue.
+            if (isInvalidModPlaceholder(task)) {
+                continue;
+            }
             merged.put(taskKey(task), task);
         }
         DmpTask localUpdate = localUpdateTasks.get(server.id);
-        if (localUpdate != null) {
+        if (localUpdate != null && !isStaleUnconfirmedGameUpdate(localUpdate)) {
             String localKey = taskKey(localUpdate);
             DmpTask previous = merged.get(localKey);
             if (isPreferredTask(localUpdate, previous)) {
@@ -2619,8 +4263,25 @@ public class DmpActivity extends AppCompatActivity
                     normalized.put("type", "mod_download");
                 }
                 DmpTask cached = DmpTask.fromJson(server, normalized);
+                if (isUnconfirmedCachedLegacyUpdate(server, cached)) {
+                    continue;
+                }
+                if (isStaleUnconfirmedGameUpdate(cached)) {
+                    continue;
+                }
+                if (isInvalidModPlaceholder(cached)) {
+                    continue;
+                }
                 String key = taskKey(cached);
                 DmpTask previous = merged.get(key);
+                // The live status poll is authoritative for an active mod.
+                // A persisted WebView success row can be stale (for example
+                // POST acknowledged before the archive was written); never
+                // let that terminal cache overwrite a live running/queued
+                // row and recreate the false “下载完成” state.
+                if (previous != null && previous.isRunning() && cached.isTerminal()) {
+                    continue;
+                }
                 if (isPreferredTask(cached, previous)) {
                     merged.put(key, cached);
                 }
@@ -2633,6 +4294,59 @@ public class DmpActivity extends AppCompatActivity
         // token-free native snapshot in the same server-scoped center.
         addNativeTransfers(server, merged);
         return new ArrayList<>(merged.values());
+    }
+
+    /**
+     * Return true for a running legacy (boolean-only) update row that has not
+     * been confirmed by the server status endpoint.  The native update path
+     * keeps its own local row while it waits for the first status poll, so
+     * dropping the unconfirmed WebView duplicate here is safe and prevents a
+     * stale preference from appearing forever in the all-platform queue.
+     */
+    private boolean isUnconfirmedCachedLegacyUpdate(@Nullable DmpServer server,
+                                                    @Nullable DmpTask task) {
+        if (server == null || !isLegacyUpdateTask(task) || !task.isRunning()) {
+            return false;
+        }
+        return !task.serverUpdateObserved && !task.serverLastUpdating;
+    }
+
+    /**
+     * Return true only for the known empty mod placeholder shape.  A real
+     * task may legitimately have zero byte progress while queued, so the
+     * identifier/name/room fields are required to be empty as well.
+     */
+    private boolean isInvalidModPlaceholder(@Nullable DmpTask task) {
+        if (task == null || !"mod_download".equals(task.type)) {
+            return false;
+        }
+        String name = task.name == null ? "" : task.name.trim();
+        String roomName = task.roomName == null ? "" : task.roomName.trim();
+        boolean noMod = task.modId <= 0 && name.isEmpty();
+        boolean noRoom = task.roomId <= 0 && roomName.isEmpty()
+                && (task.roomIds == null || task.roomIds.isEmpty())
+                && (task.roomNames == null || task.roomNames.isEmpty());
+        boolean noBytes = task.completedBytes <= 0L && task.totalBytes <= 0L
+                && task.progress <= 0d;
+        return noMod && noRoom && noBytes;
+    }
+
+    /**
+     * Drop a historical game-update snapshot which was never observed by the
+     * server.  This is deliberately time-bounded: a newly submitted task may
+     * legitimately sit in queued state for a short period, while a row older
+     * than the transition window with no running evidence is only stale cache.
+     */
+    private boolean isStaleUnconfirmedGameUpdate(@Nullable DmpTask task) {
+        if (task == null || !"game_update".equals(task.type) || !task.isRunning()) {
+            return false;
+        }
+        if (task.serverUpdateObserved || task.serverLastUpdating || task.updatedAt <= 0L) {
+            return false;
+        }
+        long updated = task.updatedAt < 100_000_000_000L
+                ? task.updatedAt * 1000L : task.updatedAt;
+        return System.currentTimeMillis() - updated > 15L * 60L * 1000L;
     }
 
     private void addNativeTransfers(DmpServer server, LinkedHashMap<String, DmpTask> merged) {
@@ -2723,10 +4437,21 @@ public class DmpActivity extends AppCompatActivity
     }
 
     private String taskKey(DmpTask task) {
-        if (task.taskId != null && !task.taskId.isEmpty()) {
-            return task.taskId;
+        String serverKey = task.server == null || task.server.id == null
+                ? "current" : task.server.id;
+        // The same mod can be represented by a random server task id, the
+        // WebView's semantic id, and the status poll row. Collapse those
+        // representations into one room/mod entry before rendering the queue.
+        if ("mod_download".equals(task.type) && task.roomId > 0 && task.modId > 0) {
+            return "mod|" + serverKey + "|" + task.roomId + "|" + task.modId;
         }
-        return task.type + "|" + task.roomId + "|" + task.name;
+        if (("game_update".equals(task.type) || "server_update".equals(task.type))) {
+            return "game_update|" + serverKey;
+        }
+        if (task.taskId != null && !task.taskId.isEmpty()) {
+            return task.type + "|" + serverKey + "|" + task.taskId;
+        }
+        return task.type + "|" + serverKey + "|" + task.roomId + "|" + task.name;
     }
 
     private String serverLabel(DmpServer server) {
@@ -2754,9 +4479,11 @@ public class DmpActivity extends AppCompatActivity
             case "pausePending":
             case "pause_pending":
             case "pausepending":
-                return "暂停中";
+                // Older snapshots may retain pause markers, but the Android
+                // task centre no longer exposes pause/continue controls.
+                return "下载中";
             case "paused":
-                return "已暂停";
+                return "下载中";
             default:
                 return "状态未知";
         }
@@ -2776,7 +4503,9 @@ public class DmpActivity extends AppCompatActivity
         }
         if ("paused".equals(normalized) || "pause_pending".equals(normalized)
                 || "pausepending".equals(normalized)) {
-            return "传输已暂停";
+            // Keep legacy paused records neutral; no pause/continue action is
+            // offered in the mobile task cards.
+            return "传输中";
         }
         if ("queued".equals(normalized) || "pending".equals(normalized)) {
             return "等待传输";
@@ -2924,6 +4653,8 @@ public class DmpActivity extends AppCompatActivity
         intent.putExtra(DmpWebActivity.EXTRA_SERVER_REMARK, server.remark);
         intent.putExtra(DmpWebActivity.EXTRA_START_CREATE_ROOM, true);
         intent.putExtra(DmpWebActivity.EXTRA_NIGHT_MODE, nightMode);
+        intent.putExtra(DmpWebActivity.EXTRA_ANDROID_DOWNLOAD_UI, androidDownloadUi);
+        intent.putExtra(DmpWebActivity.EXTRA_ANDROID_MOD_CONFIG_UI, androidModConfigUi);
         startActivity(intent);
     }
 
@@ -3089,7 +4820,9 @@ public class DmpActivity extends AppCompatActivity
         destroyed = true;
         roomLoadGeneration++;
         handler.removeCallbacks(periodicRefresh);
-        apiClient.shutdown();
+        if (apiClient != null) {
+            apiClient.shutdown();
+        }
         binding = null;
         super.onDestroy();
     }

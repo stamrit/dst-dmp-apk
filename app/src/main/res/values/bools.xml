@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Published builds must use HTTPS for DMP API traffic. -->
+    <bool name="dmp_allow_cleartext">false</bool>
+</resources>

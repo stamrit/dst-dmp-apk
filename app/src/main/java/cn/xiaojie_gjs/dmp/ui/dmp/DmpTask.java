@@ -28,6 +28,14 @@ public class DmpTask {
     public final int roomId;
     /** Full room name supplied by the unified task API for mod downloads. */
     public final String roomName;
+    /** Steam Workshop mod id for 3.2.0 /v3/mod/download/status polling. */
+    public final int modId;
+    /** Source URL required by the native 3.2.0 mod redownload endpoint. */
+    public final String fileUrl;
+    /** Whether the request is an update rather than an initial download. */
+    public final boolean update;
+    /** Transfer direction for backup/file tasks (true means phone upload). */
+    public final boolean upload;
     public final long updatedAt;
     public final long finishedAt;
     /** Compatibility metadata persisted by the Android WebView bridge for
@@ -66,6 +74,12 @@ public class DmpTask {
         int parsedRoomId = firstInt(json, "roomID", "roomId", "room_id");
         roomId = parsedRoomId > 0 || roomIds.isEmpty() ? parsedRoomId : roomIds.get(0);
         roomName = firstString(json, "roomName", "room_name");
+        modId = firstInt(json, "modID", "modId", "mod_id");
+        fileUrl = firstString(json, "file_url", "fileUrl", "fileURL");
+        update = firstBoolean(json, "update", "isUpdate");
+        upload = firstBoolean(json, "upload", "isUpload")
+                || isUploadDirection(firstString(json,
+                "direction", "transferDirection", "operation", "transferType"));
         updatedAt = firstLong(json, "updatedAt", "updated_at", "timeUpdated", "time_updated");
         finishedAt = firstLong(json, "finishedAt", "finished_at", "timeFinished", "time_finished");
         serverUpdateObserved = firstBoolean(json,
@@ -105,6 +119,12 @@ public class DmpTask {
                 || "error".equals(status)
                 || "complete".equals(status) || "completed".equals(status)
                 || "done".equals(status) || "success".equals(status);
+    }
+
+    private static boolean isUploadDirection(String value) {
+        String normalized = value == null ? "" : value.trim().toLowerCase(Locale.US);
+        return "upload".equals(normalized) || "up".equals(normalized)
+                || normalized.contains("upload");
     }
 
     private static List<Integer> intList(JSONArray array) {
